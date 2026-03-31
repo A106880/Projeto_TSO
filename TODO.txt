@@ -3,23 +3,23 @@ Funcionalidades necessarias
 -deduplicacao em todos os ficheiros
 -eliminar blocos duplicados sendo o criterio de separacao sempre 4kb
 -a eliminacao dos blocos repetidos deve ser feito antes da esscrita no disco(ver aaula 5)
--a dedduplicacao nao deve ser visivel ao utilizador
+-a deduplicacao nao deve ser visivel ao utilizador
 -guardar sempre ao sair e carregar ao entrar sem perda de dados???
 -hash OpenSSLs SHA-512 para sumarizar o conteúdo de cada bloco.
 
 
 Notas:
--Os ficheiros devem sempre ter tamnahos multiplos de 4kb.
+-Os ficheiros devem sempre ter tamanhos multiplos de 4kb.
 -Nao é permitido alterar conteudo dos ficheiros ja existentes(dentro do tamanho original), apenas é permitido adicionar conteudo mas sempre em blocos de 4kb
         -Exemplo: Ficheiro tem "abcd", nao podemos mudar o ficheiro para "adbc" apenas posso fazer "abcdefgh"
 
 
 Estruturas de dados
--criar uma struct A que teria um array de id das subpastas e tambem um array de ids de ficheiros
--struct B que tem o id do ficheiro, o tamanho original associado e os blocos que utiliza de forma ordenada(usar list)
--hash table em que a key é a pasta e o value seria a struct A
+-criar uma struct A que teria um deque de id das subpastas e o numero delas e tambem um deque de ids de ficheiros e o numero de ficheiros (rever melhor)
+-struct B que tem o id do ficheiro, o tamanho original associado e os blocos que utiliza de forma ordenada (usar deque) e o numero deles
+-hashtable em que a key é a pasta e o value seria a struct A (rever melhor)
 -hashtable com a key o id do ficheiro e como value a struct B
--hash table em que cada key é a identificacao do bloco e o value é um contador de ficheiros que necessitam do bloco
+-hashtable em que cada key é a identificacao do bloco e o value é um contador de ficheiros que necessitam do bloco
     - ao remover ficheiros é diminuido o contador nos blocos que o ficheiro em questao utliza.
-    - se o array de ficheiros do bloco ficar vazio, a entrada desse bloco deve ser apagada
--hashtable de partial index, ou seja, ter uma hashtable que sirva para manter em memoria os blocos mais utilizados
+    - se o contador de ficheiros do bloco ficar a zero, a entrada desse bloco deve ser apagada
+-hashtable de partial index, ou seja, ter uma hashtable que sirva para manter em memoria os blocos mais utilizados (sujeito a mudanca)
