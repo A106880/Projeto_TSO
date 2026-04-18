@@ -375,6 +375,36 @@ static int xmp_create(const char *path, mode_t mode,
 	return 0;
 }
 
+static int xmp_mkdir(const char *path, mode_t mode){
+	int res;
+
+#ifdef DEBUG
+	struct fuse_context *f_ctx = fuse_get_context();
+	printf("[Thread %d] Make dir for path %s, userid %d, pid %d\n", gettid(), path, f_ctx->uid, f_ctx->pid);
+#endif
+
+	res = mkdir(path, mode);
+	if (res == -1)
+		return -errno;
+
+	return 0;
+}
+
+static int xmp_rmdir(const char *path){
+	int res;
+
+#ifdef DEBUG
+	struct fuse_context *f_ctx = fuse_get_context();
+	printf("[Thread %d] Remove dir for path %s, userid %d, pid %d\n", gettid(), path, f_ctx->uid, f_ctx->pid);
+#endif
+
+	res = rmdir(path);
+	if (res == -1)
+		return -errno;
+
+	return 0;
+}
+
 static int xmp_open(const char *path, struct fuse_file_info *fi)
 {
 	int res;
