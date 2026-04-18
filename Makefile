@@ -1,7 +1,7 @@
 CC=gcc
 CFLAGS= -Wall
 DEPS = metaInfo.h
-OBJ = passthrough.o main.o
+OBJ = passthrough.o metaInfo.o
 
 LIBS=`pkg-config --cflags --libs glib-2.0` `pkg-config fuse3 --cflags --libs` -lpthread -lbz2 -lcrypto
 

@@ -3,7 +3,7 @@
 void freeFilemeta(void *data){
     if (!data) return;
 	filemeta *file = (filemeta*)data;
-	g_queue_free_full(file->blockList,freeBlockMeta); //value da block list é um blockmeta
+	g_queue_free(file->blockList); //value da block list é um apontador para blockmeta
     g_free(file);
 }
 

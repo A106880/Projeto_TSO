@@ -59,14 +59,18 @@
 
 typedef struct context {
 	GHashTable *fileIndex;
-	GHashTable *blockCounter;
+	GHashTable *blockIndex;
+	// GHashTable *blockCounter;
     // struct GHashTable *partialIndex;
     pthread_mutex_t mutex_tabelas;
+	GQueue *freeList;
     
     uint64_t open; 
 } Context;
 
 static int fill_dir_plus = 0;
+
+char *blocksPath = "/backend/blockspath";
 
 static void *xmp_init(struct fuse_conn_info *conn,
 		      struct fuse_config *cfg)
@@ -91,11 +95,15 @@ static void *xmp_init(struct fuse_conn_info *conn,
 
 	ctx->open=0;
 
-	ctx->blockCounter = g_hash_table_new_full(blockHashFunc,compareSHAHashes,g_free,NULL);
+	// ctx->blockCounter = g_hash_table_new_full(blockHashFunc,compareSHAHashes,g_free,NULL);
+	
+	ctx->blockIndex = g_hash_table_new_full(g_str_hash,g_str_equal,g_free,freeBlockMeta);
 
 	ctx->fileIndex = g_hash_table_new_full(g_str_hash,g_str_equal,g_free,freeFilemeta);
 
 	ctx->mutex_tabelas;
+
+	// ctx->freeList = g_queue_new();
 	
 	struct fuse_context *f_ctx = fuse_get_context();
 	printf("[Thread %d] Init called, userid %d, pid %d\n", gettid(), f_ctx->uid, f_ctx->pid);
@@ -107,15 +115,18 @@ static void *xmp_init(struct fuse_conn_info *conn,
 
 static void xmp_destroy(void* private_data){
 
-#ifdef DEBUG
+
 	struct fuse_context *f_ctx = fuse_get_context();
 	Context* p_ctx = (Context*) private_data;
+	if (p_ctx->freeList) {
+        g_queue_free_full(p_ctx->freeList, g_free); 
+    }
 
 	printf("[Thread %d] Destroy called, userid %d, pid %d\n", gettid(), f_ctx->uid, f_ctx->pid);
 	printf("[Thread %d] Open() - %lu\n", gettid(), p_ctx->open);
 
 	free(private_data);
-#endif
+
 }
 
 static int xmp_getattr(const char *path, struct stat *stbuf,
@@ -127,6 +138,23 @@ static int xmp_getattr(const char *path, struct stat *stbuf,
 	res = lstat(path, stbuf);
 	if (res == -1)
 		return -errno;
+
+	struct fuse_context *f_ctx = fuse_get_context();
+	Context *ctx = (Context *) f_ctx->private_data;
+
+	if (ctx && ctx->fileIndex) {
+		filemeta *file = g_hash_table_lookup(ctx->fileIndex, path);
+		if (file != NULL) {
+			stbuf->st_size = file->logicalSize;
+			stbuf->st_blocks = (file->logicalSize + 511) / 512;
+		}
+	}
+
+    filemeta *file = NULL;
+    if (ctx && ctx->fileIndex) file = g_hash_table_lookup(ctx->fileIndex, path);
+    
+    printf("[GETATTR] path: %s | tamanho_fisico: %ld | tamanho_logico: %ld\n", 
+           path, stbuf->st_size, file ? file->logicalSize : -1);
 
 	return 0;
 }
@@ -197,13 +225,41 @@ static int xmp_mknod(const char *path, mode_t mode, dev_t rdev)
 
 static int xmp_unlink(const char *path)
 {
-	int res;
+	struct fuse_context *f_ctx = fuse_get_context();
+    Context *ctx = (Context *) f_ctx->private_data;
+    int res;
 
-	res = unlink(path);
-	if (res == -1)
-		return -errno;
+    res = unlink(path);
+    if (res == -1)
+        return -errno;
 
-	return 0;
+    filemeta *file = g_hash_table_lookup(ctx->fileIndex, path);
+    if (file != NULL) {
+        GQueue *blockList = file->blockList;
+
+        for (int i = 0; i < g_queue_get_length(blockList); i++) {
+            blockmeta *block = g_queue_peek_nth(blockList, i);
+            
+            block->counter--;
+
+            if (block->counter == 0) {
+                
+                // off_t *freed_offset = g_malloc(sizeof(off_t));
+                // *freed_offset = block->block_offset;
+                // g_queue_push_tail(ctx->freeList, freed_offset);
+
+                // g_hash_table_remove(ctx->blockIndex, block->id);
+
+                unlink(block->blockPath);
+
+                g_hash_table_remove(ctx->blockIndex, block->id);
+            }
+        }
+
+        g_hash_table_remove(ctx->fileIndex, path);
+    }
+
+    return 0;
 }
 
 static int xmp_symlink(const char *from, const char *to)
@@ -341,24 +397,72 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
 static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 		    struct fuse_file_info *fi)
 {
-	int fd;
-	int res;
+	struct fuse_context *f_ctx = fuse_get_context();
+	Context *ctx = (Context *) f_ctx->private_data;
 
-	if(fi == NULL)
-		fd = open(path, O_RDONLY);
-	else
-		fd = fi->fh;
-	
-	if (fd == -1)
-		return -errno;
+	filemeta *file = g_hash_table_lookup(ctx->fileIndex,path);
+	if (file == NULL){
+		return -ENOENT;
+	}
 
-	res = pread(fd, buf, size, offset);
-	if (res == -1)
-		res = -errno;
+	printf("[READ] path: %s | offset_pedido: %ld | size_pedido: %zu | logicalSize: %ld\n", 
+           path, offset, size, file->logicalSize);
 
-	if(fi == NULL)
-		close(fd);
-	return res;
+	GQueue *blockList = file->blockList;
+    off_t current_logical_offset = 0;
+    size_t total_bytes_read = 0;
+    char *buf_ptr = buf;
+
+	for (int i = 0; i < g_queue_get_length(blockList); i++){
+		blockmeta *block = g_queue_peek_nth(blockList, i);
+
+		off_t block_start = current_logical_offset;
+        off_t block_end = current_logical_offset + block->size;
+
+		if (offset < block_end && (offset + size) > block_start){
+            off_t read_start_in_block = 0;
+            if (offset > block_start) {
+                read_start_in_block = offset - block_start;
+            }
+
+            size_t bytes_to_read_from_block = block->size - read_start_in_block;
+            
+            if (total_bytes_read + bytes_to_read_from_block > size) {
+                bytes_to_read_from_block = size - total_bytes_read;
+            }
+
+
+
+            // int fd = open(block->blockPath, O_RDONLY);
+            // if (fd != -1) {
+            //     pread(fd, buf_ptr, bytes_to_read_from_block, block->block_offset + read_start_in_block);
+            //     close(fd);
+            // } else {
+            //     return -errno;
+            // }
+
+			int fd = open(block->blockPath, O_RDONLY);
+            if (fd != -1) {
+                pread(fd, buf_ptr, bytes_to_read_from_block, read_start_in_block);
+                close(fd);
+            } else {
+                return -errno; 
+            }
+
+
+
+            buf_ptr += bytes_to_read_from_block;
+            total_bytes_read += bytes_to_read_from_block;
+
+            if (total_bytes_read == size) {
+                break;
+            }
+		}
+		current_logical_offset += block->size;
+	}	
+
+	return total_bytes_read;
+
 }
 
 static char *hash_to_hex(const unsigned char *hash) {
@@ -380,7 +484,7 @@ static int xmp_write(const char *path, const char *buf, size_t size,
 	filemeta *file = g_hash_table_lookup(ctx->fileIndex,path);
 	if (file == NULL){
 		file = g_malloc0(sizeof(filemeta));
-		file->id = strdup(path);
+		file->id = g_strdup(path);
 		file->blockList = g_queue_new();
 		g_hash_table_insert(ctx->fileIndex,(gpointer)file->id,file);
 	}
@@ -399,27 +503,53 @@ static int xmp_write(const char *path, const char *buf, size_t size,
 		}
 		
 		SHA512((const unsigned char *)(buf+i), bytes, blockHash);
+		char *hexHash = hash_to_hex(blockHash);
+		gpointer originalKey;
 
-		gpointer originalKey, value;
-		if (!(g_hash_table_lookup_extended(ctx->blockCounter, blockHash, &originalKey, &value))){
-			g_hash_table_insert(ctx->blockCounter, g_memdup2(blockHash, 64), GINT_TO_POINTER(1));
+		blockmeta *block;
+		if (!(g_hash_table_lookup_extended(ctx->blockIndex, hexHash, &originalKey, (gpointer*)&block))){
+			block = g_malloc0(sizeof(blockmeta));
+			
 
-			char *hexHash = hash_to_hex(blockHash);
-			char *blockPath = g_strconcat("/backend/", hexHash, NULL);
-			int fd = open(blockPath, O_WRONLY|O_CREAT,0644);
-			pwrite(fd,buf + i,bytes,0);
-			close(fd);
+			// block->blockPath = g_strdup(blocksPath); // Variável global do ficheiro único
+            // block->counter = 1;
+            // block->id = g_strdup(hexHash);
+            // block->size = bytes;
+            // g_hash_table_insert(ctx->blockIndex, hexHash, block);
+
+            // int fd = open(blocksPath, O_WRONLY | O_CREAT, 0644);
+            // if (fd != -1) {
+            //     if (g_queue_is_empty(ctx->freeList)) {
+            //         block->block_offset = lseek(fd, 0, SEEK_END);
+            //         write(fd, buf+i, bytes);
+            //     } else {
+            //         off_t *reused_offset = g_queue_pop_head(ctx->freeList);
+            //         block->block_offset = *reused_offset;
+            //         g_free(reused_offset); // Limpamos a memória do ponteiro antigo
+
+            //         pwrite(fd, buf+i, bytes, block->block_offset);
+            //     }
+            //     close(fd);
+
+
+			block->blockPath = g_strdup_printf("/backend/%s", hexHash); 
+            block->counter = 1;
+            block->id = g_strdup(hexHash);
+            block->size = bytes;
+            
+            g_hash_table_insert(ctx->blockIndex, hexHash, block);
+
+            int fd = open(block->blockPath, O_WRONLY|O_CREAT|O_TRUNC, 0644);
+            write(fd, buf+i, bytes);
+            close(fd);
+
+
+
 			file->realSize+=bytes;
-			g_free(blockPath);
-			g_free(hexHash);
 		}else{
-			int counter = GPOINTER_TO_INT(value);
-			g_hash_table_insert(ctx->blockCounter, originalKey, GINT_TO_POINTER(++counter));
+			block->counter++;
+			g_free(hexHash);
 		}
-
-		blockmeta *block = g_malloc0(sizeof(blockmeta));
-		block->id = g_memdup2(blockHash,64);
-		block->size = bytes;
 			
 		g_queue_push_tail(blockList, block);
 	}
@@ -428,6 +558,9 @@ static int xmp_write(const char *path, const char *buf, size_t size,
 	if (offset + size > file->logicalSize) {
 		file->logicalSize = offset + size;
 	}
+
+	printf("[WRITE] path: %s | offset: %ld | size_pedido: %zu | logicalSize_final: %ld\n", 
+           path, offset, size, file->logicalSize);
 
 	return size;
 }
