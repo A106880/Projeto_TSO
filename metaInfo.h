@@ -1,3 +1,6 @@
+#ifndef METAINFO_H
+#define METAINFO_H
+
 #include <glib.h>
 
 
@@ -32,3 +35,4 @@ guint blockHashFunc(gconstpointer key);
 
 gboolean compareSHAHashes(gconstpointer key1, gconstpointer key2);
 
+#endif
