@@ -4,6 +4,7 @@ void freeFilemeta(void *data){
     if (!data) return;
 	filemeta *file = (filemeta*)data;
 	g_queue_free(file->blockList); //value da block list é um apontador para blockmeta
+    if (file->id) g_free(file->id);
     g_free(file);
 }
 
