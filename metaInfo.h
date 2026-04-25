@@ -2,6 +2,7 @@
 #define METAINFO_H
 
 #include <glib.h>
+#include <sys/types.h>
 
 
 typedef struct file{
@@ -9,13 +10,13 @@ typedef struct file{
     off_t realSize; //tamanho depois da deduplicacao
     off_t logicalSize; // tamanho antes da deduplicacao
     GQueue *blockList; // value é o id do block
+    pthread_mutex_t lock; // lock para operações neste ficheiro
 } filemeta;
 
 typedef struct block{
-    int block_offset; //offset do bloco
+    off_t block_offset; //offset
     char *id; // id é a hash SHA-512
     size_t size; // tamanho do bloco
-    char *blockPath; // caminho do bloco no fuse
     int counter; // contador de dependencias do bloco
 } blockmeta;
 

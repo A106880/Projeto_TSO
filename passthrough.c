@@ -53,6 +53,7 @@
 
 #include "passthrough_helpers.h"
 #include "metaInfo.h"
+#include "persistance.h"
 #include <openssl/sha.h>
 
 // #define DEBUG "/tmp/debug.log"
@@ -60,13 +61,35 @@
 typedef struct context {
 	GHashTable *fileIndex;
 	GHashTable *blockIndex;
-	// GHashTable *blockCounter;
-    // struct GHashTable *partialIndex;
-    pthread_mutex_t mutex_tabelas;
+    pthread_mutex_t index_lock;
 	GQueue *freeList;
+    pthread_mutex_t freeList_lock;
     
+    int backend_fd;
+    off_t next_free_offset;
+    pthread_mutex_t offset_lock;
+
     uint64_t open; 
 } Context;
+
+off_t get_new_offset(Context *ctx, size_t size) {
+    off_t offset;
+    pthread_mutex_lock(&ctx->freeList_lock);
+	pthread_mutex_lock(&ctx->offset_lock);
+    if (!g_queue_is_empty(ctx->freeList)) {
+        off_t *poff = g_queue_pop_head(ctx->freeList);
+        offset = *poff;
+        g_free(poff);
+        pthread_mutex_unlock(&ctx->freeList_lock);
+        pthread_mutex_unlock(&ctx->offset_lock);
+        return offset;
+    }
+
+    offset = ctx->next_free_offset;
+    pthread_mutex_unlock(&ctx->offset_lock);
+	pthread_mutex_unlock(&ctx->freeList_lock);
+    return offset;
+}
 
 static int fill_dir_plus = 0;
 
@@ -94,20 +117,37 @@ static void *xmp_init(struct fuse_conn_info *conn,
 	Context *ctx=malloc(sizeof(Context));
 
 	ctx->open=0;
-
-	// ctx->blockCounter = g_hash_table_new_full(blockHashFunc,compareSHAHashes,g_free,NULL);
-	
 	ctx->blockIndex = g_hash_table_new_full(g_str_hash,g_str_equal,g_free,freeBlockMeta);
-
 	ctx->fileIndex = g_hash_table_new_full(g_str_hash,g_str_equal,g_free,freeFilemeta);
+	ctx->freeList = g_queue_new();
 
-	ctx->mutex_tabelas;
+	pthread_mutex_init(&ctx->index_lock, NULL);
+	pthread_mutex_init(&ctx->freeList_lock, NULL);
+	pthread_mutex_init(&ctx->offset_lock, NULL);
 
-	// ctx->freeList = g_queue_new();
-	
+    ctx->backend_fd = open("/backend/data.bin", O_RDWR | O_CREAT, 0644);
+    if (ctx->backend_fd != -1) {
+        struct stat st;
+        if (fstat(ctx->backend_fd, &st) == 0) {
+            ctx->next_free_offset = st.st_size;
+        } else {
+            ctx->next_free_offset = 0;
+        }
+    }
+
 	struct fuse_context *f_ctx = fuse_get_context();
 	printf("[Thread %d] Init called, userid %d, pid %d\n", gettid(), f_ctx->uid, f_ctx->pid);
 	
+	// load_metadata(ctx->fileIndex, ctx->blockIndex, ctx->freeList);
+
+    GHashTableIter iter;
+    gpointer key, value;
+    g_hash_table_iter_init(&iter, ctx->fileIndex);
+    while (g_hash_table_iter_next(&iter, &key, &value)) {
+        filemeta *fm = (filemeta *)value;
+        pthread_mutex_init(&fm->lock, NULL);
+    }
+
 	return ctx;
 
 	
@@ -118,6 +158,14 @@ static void xmp_destroy(void* private_data){
 
 	struct fuse_context *f_ctx = fuse_get_context();
 	Context* p_ctx = (Context*) private_data;
+
+	// save_metadata(p_ctx->fileIndex, p_ctx->blockIndex, p_ctx->freeList);
+	pthread_mutex_destroy(&p_ctx->index_lock);
+	pthread_mutex_destroy(&p_ctx->freeList_lock);
+	pthread_mutex_destroy(&p_ctx->offset_lock);
+
+    if (p_ctx->backend_fd != -1) close(p_ctx->backend_fd);
+
 	if (p_ctx->freeList) {
         g_queue_free_full(p_ctx->freeList, g_free); 
     }
@@ -142,19 +190,21 @@ static int xmp_getattr(const char *path, struct stat *stbuf,
 	struct fuse_context *f_ctx = fuse_get_context();
 	Context *ctx = (Context *) f_ctx->private_data;
 
+	pthread_mutex_lock(&ctx->index_lock);
+	filemeta *file = NULL;
 	if (ctx && ctx->fileIndex) {
-		filemeta *file = g_hash_table_lookup(ctx->fileIndex, path);
+		file = g_hash_table_lookup(ctx->fileIndex, path);
 		if (file != NULL) {
+            pthread_mutex_lock(&file->lock);
 			stbuf->st_size = file->logicalSize;
 			stbuf->st_blocks = (file->logicalSize + 511) / 512;
+            pthread_mutex_unlock(&file->lock);
 		}
 	}
-
-    filemeta *file = NULL;
-    if (ctx && ctx->fileIndex) file = g_hash_table_lookup(ctx->fileIndex, path);
     
     printf("[GETATTR] path: %s | tamanho_fisico: %ld | tamanho_logico: %ld\n", 
            path, stbuf->st_size, file ? file->logicalSize : -1);
+	pthread_mutex_unlock(&ctx->index_lock);
 
 	return 0;
 }
@@ -233,31 +283,31 @@ static int xmp_unlink(const char *path)
     if (res == -1)
         return -errno;
 
+    pthread_mutex_lock(&ctx->index_lock);
     filemeta *file = g_hash_table_lookup(ctx->fileIndex, path);
     if (file != NULL) {
-        GQueue *blockList = file->blockList;
+        pthread_mutex_lock(&file->lock);
+        g_hash_table_steal(ctx->fileIndex, path);
 
+        GQueue *blockList = file->blockList;
         for (int i = 0; i < g_queue_get_length(blockList); i++) {
             blockmeta *block = g_queue_peek_nth(blockList, i);
-            
             block->counter--;
-
             if (block->counter == 0) {
-                
-                // off_t *freed_offset = g_malloc(sizeof(off_t));
-                // *freed_offset = block->block_offset;
-                // g_queue_push_tail(ctx->freeList, freed_offset);
-
-                // g_hash_table_remove(ctx->blockIndex, block->id);
-
-                unlink(block->blockPath);
+                pthread_mutex_lock(&ctx->freeList_lock);
+                off_t *freed_offset = g_malloc(sizeof(off_t));
+                *freed_offset = block->block_offset;
+                g_queue_push_tail(ctx->freeList, freed_offset);
+                pthread_mutex_unlock(&ctx->freeList_lock);
 
                 g_hash_table_remove(ctx->blockIndex, block->id);
             }
         }
-
-        g_hash_table_remove(ctx->fileIndex, path);
+        pthread_mutex_unlock(&file->lock);
+        pthread_mutex_destroy(&file->lock);
+        freeFilemeta(file);
     }
+    pthread_mutex_unlock(&ctx->index_lock);
 
     return 0;
 }
@@ -283,6 +333,21 @@ static int xmp_rename(const char *from, const char *to, unsigned int flags)
 	res = rename(from, to);
 	if (res == -1)
 		return -errno;
+
+	struct fuse_context *f_ctx = fuse_get_context();
+	Context *ctx = (Context *) f_ctx->private_data;
+
+	pthread_mutex_lock(&ctx->index_lock);
+	filemeta *file = g_hash_table_lookup(ctx->fileIndex, from);
+	if (file != NULL) {
+        pthread_mutex_lock(&file->lock);
+		g_hash_table_steal(ctx->fileIndex, from); // remove without freeing
+		g_free(file->id);
+		file->id = g_strdup(to);
+		g_hash_table_insert(ctx->fileIndex, g_strdup(to), file);
+        pthread_mutex_unlock(&file->lock);
+	}
+	pthread_mutex_unlock(&ctx->index_lock);
 
 	return 0;
 }
@@ -430,10 +495,14 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 	struct fuse_context *f_ctx = fuse_get_context();
 	Context *ctx = (Context *) f_ctx->private_data;
 
+	pthread_mutex_lock(&ctx->index_lock);
 	filemeta *file = g_hash_table_lookup(ctx->fileIndex,path);
 	if (file == NULL){
+		pthread_mutex_unlock(&ctx->index_lock);
 		return -ENOENT;
 	}
+    pthread_mutex_lock(&file->lock);
+    pthread_mutex_unlock(&ctx->index_lock);
 
 	printf("[READ] path: %s | offset_pedido: %ld | size_pedido: %zu | logicalSize: %ld\n", 
            path, offset, size, file->logicalSize);
@@ -461,25 +530,12 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
                 bytes_to_read_from_block = size - total_bytes_read;
             }
 
-
-
-            // int fd = open(block->blockPath, O_RDONLY);
-            // if (fd != -1) {
-            //     pread(fd, buf_ptr, bytes_to_read_from_block, block->block_offset + read_start_in_block);
-            //     close(fd);
-            // } else {
-            //     return -errno;
-            // }
-
-			int fd = open(block->blockPath, O_RDONLY);
-            if (fd != -1) {
-                pread(fd, buf_ptr, bytes_to_read_from_block, read_start_in_block);
-                close(fd);
+            if (ctx->backend_fd != -1) {
+                pread(ctx->backend_fd, buf_ptr, bytes_to_read_from_block, block->block_offset + read_start_in_block);
             } else {
+                pthread_mutex_unlock(&file->lock);
                 return -errno; 
             }
-
-
 
             buf_ptr += bytes_to_read_from_block;
             total_bytes_read += bytes_to_read_from_block;
@@ -490,6 +546,8 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 		}
 		current_logical_offset += block->size;
 	}	
+
+	pthread_mutex_unlock(&file->lock);
 
 	return total_bytes_read;
 
@@ -511,19 +569,22 @@ static int xmp_write(const char *path, const char *buf, size_t size,
 	struct fuse_context *f_ctx = fuse_get_context();
 	Context *ctx = (Context *) f_ctx->private_data;
 	
+	pthread_mutex_lock(&ctx->index_lock);
 	filemeta *file = g_hash_table_lookup(ctx->fileIndex,path);
 	if (file == NULL){
 		file = g_malloc0(sizeof(filemeta));
 		file->id = g_strdup(path);
 		file->blockList = g_queue_new();
+        pthread_mutex_init(&file->lock, NULL);
 		g_hash_table_insert(ctx->fileIndex,(gpointer)file->id,file);
 	}
+    pthread_mutex_lock(&file->lock);
+    pthread_mutex_unlock(&ctx->index_lock);
 
 	GQueue *blockList = file->blockList;
 
 	for(int i = 0; i<size;i+=4096){
 		unsigned char blockHash[64];
-
 
 		size_t bytes;
 		if (size - i < 4096){
@@ -534,63 +595,57 @@ static int xmp_write(const char *path, const char *buf, size_t size,
 		
 		SHA512((const unsigned char *)(buf+i), bytes, blockHash);
 		char *hexHash = hash_to_hex(blockHash);
-		gpointer originalKey;
 
-		blockmeta *block;
-		if (!(g_hash_table_lookup_extended(ctx->blockIndex, hexHash, &originalKey, (gpointer*)&block))){
-			block = g_malloc0(sizeof(blockmeta));
-			
-
-			// block->blockPath = g_strdup(blocksPath); // Variável global do ficheiro único
-            // block->counter = 1;
-            // block->id = g_strdup(hexHash);
-            // block->size = bytes;
-            // g_hash_table_insert(ctx->blockIndex, hexHash, block);
-
-            // int fd = open(blocksPath, O_WRONLY | O_CREAT, 0644);
-            // if (fd != -1) {
-            //     if (g_queue_is_empty(ctx->freeList)) {
-            //         block->block_offset = lseek(fd, 0, SEEK_END);
-            //         write(fd, buf+i, bytes);
-            //     } else {
-            //         off_t *reused_offset = g_queue_pop_head(ctx->freeList);
-            //         block->block_offset = *reused_offset;
-            //         g_free(reused_offset); // Limpamos a memória do ponteiro antigo
-
-            //         pwrite(fd, buf+i, bytes, block->block_offset);
-            //     }
-            //     close(fd);
-
-
-			block->blockPath = g_strdup_printf("/backend/%s", hexHash); 
-            block->counter = 1;
-            block->id = g_strdup(hexHash);
-            block->size = bytes;
+        pthread_mutex_lock(&ctx->index_lock);
+		blockmeta *block = g_hash_table_lookup(ctx->blockIndex, hexHash);
+		if (!block) {
+            pthread_mutex_unlock(&ctx->index_lock);
             
-            g_hash_table_insert(ctx->blockIndex, hexHash, block);
+            off_t offset = get_new_offset(ctx, bytes);
+            if (ctx->backend_fd != -1) {
+                pwrite(ctx->backend_fd, buf+i, bytes, offset);
+            }
+			ctx->next_free_offset += size; //FIXME
 
-            int fd = open(block->blockPath, O_WRONLY|O_CREAT|O_TRUNC, 0644);
-            write(fd, buf+i, bytes);
-            close(fd);
-
-
-
-			file->realSize+=bytes;
-		}else{
+            pthread_mutex_lock(&ctx->index_lock);
+            blockmeta *block2 = g_hash_table_lookup(ctx->blockIndex, hexHash);
+            if (block2) {
+                block2->counter++;
+                block = block2;
+                g_free(hexHash);
+                
+                pthread_mutex_lock(&ctx->freeList_lock);
+                off_t *waste_off = g_malloc(sizeof(off_t));
+                *waste_off = offset;
+                g_queue_push_tail(ctx->freeList, waste_off);
+                pthread_mutex_unlock(&ctx->freeList_lock);
+            } else {
+                block = g_malloc0(sizeof(blockmeta));
+                block->id = hexHash;
+                block->size = bytes;
+                block->counter = 1;
+                block->block_offset = offset;
+                g_hash_table_insert(ctx->blockIndex, block->id, block);
+                file->realSize += bytes;
+            }
+            pthread_mutex_unlock(&ctx->index_lock);
+		} else {
 			block->counter++;
+            pthread_mutex_unlock(&ctx->index_lock);
 			g_free(hexHash);
 		}
 			
 		g_queue_push_tail(blockList, block);
 	}
 	
-
 	if (offset + size > file->logicalSize) {
 		file->logicalSize = offset + size;
 	}
 
 	printf("[WRITE] path: %s | offset: %ld | size_pedido: %zu | logicalSize_final: %ld\n", 
            path, offset, size, file->logicalSize);
+
+	pthread_mutex_unlock(&file->lock);
 
 	return size;
 }
