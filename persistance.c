@@ -171,7 +171,7 @@ void load_metadata(GHashTable *fileIndex, GHashTable *blockIndex, GQueue *freeLi
         fm->realSize    = (off_t)realSize;
         fm->logicalSize = (off_t)logicalSize;
         fm->blockList   = g_queue_new();
-        pthread_mutex_init(&fm->lock, NULL);
+        ticket_rwlock_init(&fm->lock);
 
         for (uint64_t j = 0; j < nfile_blocks; j++) {
             char *block_id = read_string(f);

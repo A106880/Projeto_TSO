@@ -119,8 +119,9 @@ static void *xmp_init(struct fuse_conn_info *conn,
 
     struct fuse_context *f_ctx = fuse_get_context();
 	printf("[Thread %d] Init called, userid %d, pid %d\n", gettid(), f_ctx->uid, f_ctx->pid);
-
-    // load_metadata(ctx->fileIndex, ctx->blockIndex, ctx->freeList);
+	
+	// load_metadata(GHashTable *fileIndex, GHashTable *blockIndex, GQueue *freeList, off_t *next_free_offset)
+    load_metadata(ctx->fileIndex, ctx->blockIndex, ctx->freeList, &ctx->next_free_offset);
 
 
     //FIXME VER MELHOR A PARTE DE INIT DOS LOCKS APOS LOAD
@@ -135,8 +136,7 @@ static void xmp_destroy(void* private_data){
 
 	struct fuse_context *f_ctx = fuse_get_context();
 	Context* p_ctx = (Context*) private_data;
-
-    // save_metadata(p_ctx->fileIndex, p_ctx->blockIndex, p_ctx->freeList);
+    save_metadata(p_ctx->fileIndex, p_ctx->blockIndex, p_ctx->freeList, p_ctx->next_free_offset);
 	ticket_rwlock_destroy(&p_ctx->file_index_lock);
 	ticket_rwlock_destroy(&p_ctx->block_index_lock);
 	pthread_mutex_destroy(&p_ctx->freeList_lock);
@@ -850,8 +850,8 @@ static off_t xmp_lseek(const char *path, off_t off, int whence, struct fuse_file
 }
 
 static const struct fuse_operations xmp_oper = {
-	.init           = xmp_init,
-	.destroy = xmp_destroy,
+	.init       = xmp_init,
+	.destroy 	= xmp_destroy,
 	.getattr	= xmp_getattr,
 	.access		= xmp_access,
 	.readlink	= xmp_readlink,
@@ -862,6 +862,8 @@ static const struct fuse_operations xmp_oper = {
 	.rename		= xmp_rename,
 	.link		= xmp_link,
 	.chmod		= xmp_chmod,
+	.mkdir		= xmp_mkdir,
+	.rmdir		= xmp_rmdir,
 	.chown		= xmp_chown,
 	.truncate	= xmp_truncate,
 #ifdef HAVE_UTIMENSAT
