@@ -54,6 +54,19 @@ typedef struct {
     int   error;
 } SaveCtx;
 
+static void save_block_entry(gpointer key, gpointer value, gpointer user_data) {
+    SaveCtx *ctx = (SaveCtx *)user_data;
+    if (ctx->error) return;
+
+    (void)key;
+    blockmeta *bm = (blockmeta *)value;
+
+    if (write_string(ctx->f, bm->id) != 0)                      { ctx->error = 1; return; }
+    if (write_uint64(ctx->f, (uint64_t)bm->size) != 0)          { ctx->error = 1; return; }
+    if (write_int64(ctx->f, (int64_t)bm->block_offset) != 0)    { ctx->error = 1; return; }
+    if (write_uint64(ctx->f, (uint64_t)bm->counter) != 0)       { ctx->error = 1; return; }
+}
+
 static void save_file_entry(gpointer key, gpointer value, gpointer user_data) {
     (void)key;
     SaveCtx *ctx = (SaveCtx *)user_data;
@@ -61,9 +74,9 @@ static void save_file_entry(gpointer key, gpointer value, gpointer user_data) {
 
     filemeta *fm = (filemeta *)value;
 
-    if (write_string(ctx->f, fm->id) != 0)         { ctx->error = 1; return; }
-    if (write_int64(ctx->f, (int64_t)fm->realSize) != 0)    { ctx->error = 1; return; }
-    if (write_int64(ctx->f, (int64_t)fm->logicalSize) != 0) { ctx->error = 1; return; }
+    if (write_string(ctx->f, fm->id) != 0)                          { ctx->error = 1; return; }
+    if (write_int64(ctx->f, (int64_t)fm->realSize) != 0)            { ctx->error = 1; return; }
+    if (write_int64(ctx->f, (int64_t)fm->logicalSize) != 0)         { ctx->error = 1; return; }
 
     uint64_t nblocks = (uint64_t)g_queue_get_length(fm->blockList);
     if (write_uint64(ctx->f, nblocks) != 0) { ctx->error = 1; return; }
@@ -71,40 +84,73 @@ static void save_file_entry(gpointer key, gpointer value, gpointer user_data) {
     GList *node = g_queue_peek_head_link(fm->blockList);
     while (node) {
         blockmeta *bm = (blockmeta *)node->data;
-        if (write_bytes(ctx->f, bm->id, 64) != 0)              { ctx->error = 1; return; }
-        if (write_uint64(ctx->f, (uint64_t)bm->size) != 0)     { ctx->error = 1; return; }
+        if (write_string(ctx->f, bm->id) != 0) { ctx->error = 1; return; }
         node = node->next;
     }
 }
 
-static void save_block_entry(gpointer key, gpointer value, gpointer user_data) {
-    SaveCtx *ctx = (SaveCtx *)user_data;
-    if (ctx->error) return;
-
-    if (write_bytes(ctx->f, key, 64) != 0)                          { ctx->error = 1; return; }
-    if (write_uint64(ctx->f, (uint64_t)GPOINTER_TO_INT(value)) != 0) { ctx->error = 1; return; }
-}
-
-void save_metadata(GHashTable *fileIndex, GHashTable *blockCounter) {
+void save_metadata(GHashTable *fileIndex, GHashTable *blockIndex, GQueue *freeList, off_t next_free_offset) {
     FILE *f = fopen(PERSISTENCE_FILE, "wb");
     if (!f) return;
 
     SaveCtx ctx = { f, 0 };
 
+    if (write_int64(f, (int64_t)next_free_offset) != 0) { fclose(f); return; }
+
+    uint64_t nblocks = (uint64_t)g_hash_table_size(blockIndex);
+    if (write_uint64(f, nblocks) != 0) { fclose(f); return; }
+    g_hash_table_foreach(blockIndex, save_block_entry, &ctx);
+    if (ctx.error) { fclose(f); return; }
+
     uint64_t nfiles = (uint64_t)g_hash_table_size(fileIndex);
     if (write_uint64(f, nfiles) != 0) { fclose(f); return; }
     g_hash_table_foreach(fileIndex, save_file_entry, &ctx);
+    if (ctx.error) { fclose(f); return; }
 
-    uint64_t nblocks = (uint64_t)g_hash_table_size(blockCounter);
-    if (!ctx.error && write_uint64(f, nblocks) != 0) ctx.error = 1;
-    if (!ctx.error) g_hash_table_foreach(blockCounter, save_block_entry, &ctx);
+    uint64_t nfree = (uint64_t)g_queue_get_length(freeList);
+    if (write_uint64(f, nfree) != 0) { fclose(f); return; }
+    GList *node = g_queue_peek_head_link(freeList);
+    while (node) {
+        off_t *off = (off_t *)node->data;
+        if (write_int64(f, (int64_t)*off) != 0) { fclose(f); return; }
+        node = node->next;
+    }
 
     fclose(f);
 }
 
-void load_metadata(GHashTable *fileIndex, GHashTable *blockCounter) {
+void load_metadata(GHashTable *fileIndex, GHashTable *blockIndex, GQueue *freeList, off_t *next_free_offset) {
     FILE *f = fopen(PERSISTENCE_FILE, "rb");
     if (!f) return;
+
+    int64_t saved_offset;
+    if (read_int64(f, &saved_offset) != 0) { fclose(f); return; }
+    *next_free_offset = (off_t)saved_offset;
+
+    uint64_t nblocks;
+    if (read_uint64(f, &nblocks) != 0) { fclose(f); return; }
+
+    for (uint64_t i = 0; i < nblocks; i++) {
+        char *id = read_string(f);
+        if (!id) goto err;
+
+        uint64_t bsize;
+        if (read_uint64(f, &bsize) != 0) { g_free(id); goto err; }
+
+        int64_t boffset;
+        if (read_int64(f, &boffset) != 0) { g_free(id); goto err; }
+
+        uint64_t bcounter;
+        if (read_uint64(f, &bcounter) != 0) { g_free(id); goto err; }
+
+        blockmeta *bm = g_malloc0(sizeof(blockmeta));
+        bm->id           = id;
+        bm->size         = (size_t)bsize;
+        bm->block_offset = (off_t)boffset;
+        bm->counter      = (int)bcounter;
+
+        g_hash_table_insert(blockIndex, bm->id, bm);
+    }
 
     uint64_t nfiles;
     if (read_uint64(f, &nfiles) != 0) { fclose(f); return; }
@@ -117,45 +163,39 @@ void load_metadata(GHashTable *fileIndex, GHashTable *blockCounter) {
         if (read_int64(f, &realSize) != 0)    { g_free(id); goto err; }
         if (read_int64(f, &logicalSize) != 0) { g_free(id); goto err; }
 
-        uint64_t nblocks;
-        if (read_uint64(f, &nblocks) != 0) { g_free(id); goto err; }
+        uint64_t nfile_blocks;
+        if (read_uint64(f, &nfile_blocks) != 0) { g_free(id); goto err; }
 
         filemeta *fm = g_malloc0(sizeof(filemeta));
         fm->id          = id;
         fm->realSize    = (off_t)realSize;
         fm->logicalSize = (off_t)logicalSize;
         fm->blockList   = g_queue_new();
+        pthread_mutex_init(&fm->lock, NULL);
 
-        for (uint64_t j = 0; j < nblocks; j++) {
-            blockmeta *bm = g_malloc0(sizeof(blockmeta));
-            bm->id = g_malloc0(64);
-            if (read_bytes(f, bm->id, 64) != 0) {
-                freeBlockMeta(bm);
-                freeFilemeta(fm);
-                goto err;
-            }
-            uint64_t bsize;
-            if (read_uint64(f, &bsize) != 0) {
-                freeBlockMeta(bm);
-                freeFilemeta(fm);
-                goto err;
-            }
-            bm->size = (size_t)bsize;
+        for (uint64_t j = 0; j < nfile_blocks; j++) {
+            char *block_id = read_string(f);
+            if (!block_id) { freeFilemeta(fm); goto err; }
+
+            blockmeta *bm = g_hash_table_lookup(blockIndex, block_id);
+            g_free(block_id);
+            if (!bm) { freeFilemeta(fm); goto err; }
+
             g_queue_push_tail(fm->blockList, bm);
         }
 
-        g_hash_table_insert(fileIndex, (gpointer)fm->id, fm);
+        g_hash_table_insert(fileIndex, fm->id, fm);
     }
 
-    uint64_t nblocks;
-    if (read_uint64(f, &nblocks) != 0) { fclose(f); return; }
+    uint64_t nfree;
+    if (read_uint64(f, &nfree) != 0) { fclose(f); return; }
 
-    for (uint64_t i = 0; i < nblocks; i++) {
-        unsigned char *hash = g_malloc0(64);
-        if (read_bytes(f, hash, 64) != 0) { g_free(hash); goto err; }
-        uint64_t counter;
-        if (read_uint64(f, &counter) != 0) { g_free(hash); goto err; }
-        g_hash_table_insert(blockCounter, hash, GINT_TO_POINTER((int)counter));
+    for (uint64_t i = 0; i < nfree; i++) {
+        int64_t off;
+        if (read_int64(f, &off) != 0) goto err;
+        off_t *poff = g_malloc(sizeof(off_t));
+        *poff = (off_t)off;
+        g_queue_push_tail(freeList, poff);
     }
 
     fclose(f);
