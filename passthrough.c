@@ -98,8 +98,8 @@ static void *xmp_init(struct fuse_conn_info *conn,
 	Context *ctx=malloc(sizeof(Context));
 
 	ctx->open=0;
-	ctx->blockIndex = g_hash_table_new_full(g_str_hash,g_str_equal,g_free,freeBlockMeta);
-	ctx->fileIndex = g_hash_table_new_full(g_str_hash,g_str_equal,g_free,freeFilemeta);
+	ctx->blockIndex = g_hash_table_new_full(blockHashFunc,compareSHAHashes,NULL,freeBlockMeta);
+	ctx->fileIndex = g_hash_table_new_full(g_str_hash,g_str_equal,NULL,freeFilemeta);
 	ctx->freeList = g_queue_new();
 
 	ticket_rwlock_init(&ctx->file_index_lock);
@@ -120,15 +120,9 @@ static void *xmp_init(struct fuse_conn_info *conn,
     struct fuse_context *f_ctx = fuse_get_context();
 	printf("[Thread %d] Init called, userid %d, pid %d\n", gettid(), f_ctx->uid, f_ctx->pid);
 	
-	// load_metadata(GHashTable *fileIndex, GHashTable *blockIndex, GQueue *freeList, off_t *next_free_offset)
     load_metadata(ctx->fileIndex, ctx->blockIndex, ctx->freeList, &ctx->next_free_offset);
 
-
-    //FIXME VER MELHOR A PARTE DE INIT DOS LOCKS APOS LOAD
-
 	return ctx;
-
-
 }
 
 static void xmp_destroy(void* private_data){
@@ -250,22 +244,22 @@ static int xmp_mknod(const char *path, mode_t mode, dev_t rdev)
 
 static int xmp_unlink(const char *path)
 {
-	struct fuse_context *f_ctx = fuse_get_context();
+    struct fuse_context *f_ctx = fuse_get_context();
     Context *ctx = (Context *) f_ctx->private_data;
 
     ticket_rwlock_write_lock(&ctx->file_index_lock);
     filemeta *file = g_hash_table_lookup(ctx->fileIndex, path);
     if (file == NULL) {
         ticket_rwlock_write_unlock(&ctx->file_index_lock);
-        return unlink(path) == -1 ? -errno : 0;
+        return -ENOENT; // Ficheiro não existe
     }
 
     ticket_rwlock_write_lock(&file->lock);
     ticket_rwlock_write_lock(&ctx->block_index_lock);
 
-    GHashTable *uniqueBlocks = g_hash_table_new(g_str_hash, g_str_equal);
-    for (int i = 0; i < g_queue_get_length(file->blockList); i++) {
-        blockmeta *block = g_queue_peek_nth(file->blockList, i);
+    GHashTable *uniqueBlocks = g_hash_table_new(blockHashFunc, compareSHAHashes);
+    for (int i = 0; i < file->blockList->len; i++) {
+        blockmeta *block = (blockmeta *)g_ptr_array_index(file->blockList, i);
         g_hash_table_insert(uniqueBlocks, block->id, block);
     }
 
@@ -280,7 +274,7 @@ static int xmp_unlink(const char *path)
     pthread_mutex_lock(&ctx->freeList_lock);
 
     int res = unlink(path);
-    if (res == -1) {
+    if (res == -1 && errno != ENOENT) {
         int err = -errno;
         pthread_mutex_unlock(&ctx->freeList_lock);
         g_hash_table_iter_init(&b_iter, uniqueBlocks);
@@ -293,16 +287,18 @@ static int xmp_unlink(const char *path)
         ticket_rwlock_write_unlock(&ctx->file_index_lock);
         return err;
     }
-
+    
     g_hash_table_steal(ctx->fileIndex, path);
-    GQueue *blockList = file->blockList;
-    for (int i = 0; i < g_queue_get_length(blockList); i++) {
-        blockmeta *block = g_queue_peek_nth(blockList, i);
+    GPtrArray *blockList = file->blockList;
+    for (int i = 0; i < blockList->len; i++) {
+        blockmeta *block = (blockmeta *)g_ptr_array_index(blockList, i);
         block->counter--;
         if (block->counter == 0) {
             off_t *freed_offset = g_malloc(sizeof(off_t));
             *freed_offset = block->block_offset;
             g_queue_push_tail(ctx->freeList, freed_offset);
+            ticket_rwlock_write_unlock(&block->lock);
+            g_hash_table_remove(uniqueBlocks, block->id);
             g_hash_table_remove(ctx->blockIndex, block->id);
         }
     }
@@ -488,7 +484,7 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
 static gint compare_blocks(gconstpointer a, gconstpointer b) {
     blockmeta *block_a = (blockmeta *)a;
     blockmeta *block_b = (blockmeta *)b;
-    return strcmp(block_a->id, block_b->id);
+    return memcmp(block_a->id, block_b->id, 64);
 }
 
 static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
@@ -509,15 +505,24 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
     printf("[READ] path: %s | offset_pedido: %ld | size_pedido: %zu | logicalSize: %ld\n", 
             path, offset, size, file->logicalSize);
 
-    GQueue *blockList = file->blockList;
-    GHashTable *uniqueBlocks = g_hash_table_new(g_str_hash, g_str_equal);
-    off_t c_offset = 0;
-    for (int i = 0; i < g_queue_get_length(blockList); i++){
-        blockmeta *block = g_queue_peek_nth(blockList, i);
-        if (offset < c_offset + block->size && (offset + size) > c_offset){
-            g_hash_table_insert(uniqueBlocks, block->id, block);
-        }
-        c_offset += block->size;
+    if (offset >= file->logicalSize) {
+        ticket_rwlock_read_unlock(&ctx->block_index_lock);
+        ticket_rwlock_read_unlock(&file->lock);
+        ticket_rwlock_read_unlock(&ctx->file_index_lock);
+        return 0;
+    }
+
+    if (offset + size > file->logicalSize) {
+        size = file->logicalSize - offset;
+    }
+
+    int start_index = offset / 4096;
+    int end_index = (offset + size - 1) / 4096;
+
+    GHashTable *uniqueBlocks = g_hash_table_new(blockHashFunc, compareSHAHashes);
+    for (int i = start_index; i <= end_index; i++) {
+        blockmeta *block = (blockmeta *)g_ptr_array_index(file->blockList, i);
+        g_hash_table_insert(uniqueBlocks, block->id, block);
     }
 
     GList *blocks_to_lock = g_hash_table_get_values(uniqueBlocks);
@@ -528,31 +533,31 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
     }
     g_list_free(blocks_to_lock);
 
-    off_t current_logical_offset = 0;
     size_t total_bytes_read = 0;
     char *buf_ptr = buf;
     int err = 0;
 
-    for (int i = 0; i < g_queue_get_length(blockList); i++){
-        blockmeta *block = g_queue_peek_nth(blockList, i);
-        off_t block_start = current_logical_offset;
-        off_t block_end = current_logical_offset + block->size;
-
-        if (offset < block_end && (offset + size) > block_start){
-            off_t read_start_in_block = (offset > block_start) ? (offset - block_start) : 0;
-            size_t bytes_to_read = block->size - read_start_in_block;
-            if (total_bytes_read + bytes_to_read > size) bytes_to_read = size - total_bytes_read;
-
-            if (ctx->backend_fd != -1) {
-                ssize_t ret = pread(ctx->backend_fd, buf_ptr, bytes_to_read, block->block_offset + read_start_in_block);
-                if (ret == -1) { err = -errno; break; }
-            } else { err = -EBADF; break; }
-
-            buf_ptr += bytes_to_read;
-            total_bytes_read += bytes_to_read;
-            if (total_bytes_read == size) break;
+    for (int i = start_index; i <= end_index; i++) {
+        blockmeta *block = (blockmeta *)g_ptr_array_index(file->blockList, i);
+        
+        off_t block_start_logical = (off_t)i * 4096;
+        off_t read_start_in_block = (offset > block_start_logical) ? (offset - block_start_logical) : 0;
+        size_t bytes_to_read = 4096 - read_start_in_block;
+        
+        if (total_bytes_read + bytes_to_read > size) {
+            bytes_to_read = size - total_bytes_read;
         }
-        current_logical_offset += block->size;
+
+        if (ctx->backend_fd != -1) {
+            ssize_t ret = pread(ctx->backend_fd, buf_ptr, bytes_to_read, block->block_offset + read_start_in_block);
+            if (ret == -1) { err = -errno; break; }
+        } else { 
+            err = -EBADF; 
+            break; 
+        }
+
+        buf_ptr += bytes_to_read;
+        total_bytes_read += bytes_to_read;
     }   
 
     GHashTableIter b_iter;
@@ -579,49 +584,70 @@ static void hash_to_hex(const unsigned char *hash, char *hex_str) {
 }
 
 static int xmp_write(const char *path, const char *buf, size_t size,
-		     off_t offset, struct fuse_file_info *fi)
+             off_t offset, struct fuse_file_info *fi)
 {
-	struct fuse_context *f_ctx = fuse_get_context();
-	Context *ctx = (Context *) f_ctx->private_data;
-    
+    struct fuse_context *f_ctx = fuse_get_context();
+    Context *ctx = (Context *) f_ctx->private_data;
     if (size % 4096 != 0) return -EINVAL;
 
-    ticket_rwlock_write_lock(&ctx->file_index_lock);
-    filemeta *file = g_hash_table_lookup(ctx->fileIndex,path);
-    if (file == NULL){
-        file = g_malloc0(sizeof(filemeta));
-        file->id = g_strdup(path);
-        file->blockList = g_queue_new();
-        ticket_rwlock_init(&file->lock);
-        g_hash_table_insert(ctx->fileIndex,(gpointer)file->id,file);
+    int num_blocks = size / 4096;
+    unsigned char (*blockHashes)[64] = g_malloc(num_blocks * 64);
+    for(int i = 0; i < num_blocks; i++) {
+        SHA512((const unsigned char *)(buf + i * 4096), 4096, blockHashes[i]);
     }
-    ticket_rwlock_write_lock(&file->lock);
-    if (offset != file->logicalSize) {
-        ticket_rwlock_write_unlock(&file->lock);
+
+    ticket_rwlock_read_lock(&ctx->file_index_lock);
+    filemeta *file = g_hash_table_lookup(ctx->fileIndex, path);
+    
+    if (file == NULL) {
+        ticket_rwlock_read_unlock(&ctx->file_index_lock);
+        ticket_rwlock_write_lock(&ctx->file_index_lock);
+        
+        file = g_hash_table_lookup(ctx->fileIndex, path);
+        if (file == NULL) {
+            file = g_malloc0(sizeof(filemeta));
+            file->id = g_strdup(path);
+            file->blockList = g_ptr_array_new();
+            ticket_rwlock_init(&file->lock);
+            g_hash_table_insert(ctx->fileIndex, (gpointer)file->id, file);
+        }
         ticket_rwlock_write_unlock(&ctx->file_index_lock);
-        return -ENOTSUP;
+        ticket_rwlock_read_lock(&ctx->file_index_lock); 
     }
     
-    ticket_rwlock_write_lock(&ctx->block_index_lock);
-    GQueue *blockList = file->blockList;
-    GHashTable *lockedBlocks = g_hash_table_new(g_str_hash, g_str_equal);
+    ticket_rwlock_write_lock(&file->lock);
+    
+    if (offset != file->logicalSize) {
+        ticket_rwlock_write_unlock(&file->lock);
+        ticket_rwlock_read_unlock(&ctx->file_index_lock);
+        g_free(blockHashes);
+        return -ENOTSUP;
+    }
+
+    ticket_rwlock_read_lock(&ctx->block_index_lock);
+
+    GPtrArray *blockList = file->blockList;
+    GHashTable *lockedBlocks = g_hash_table_new(blockHashFunc, compareSHAHashes);
     GQueue *newBlocksInfo = g_queue_new();
 
-    for(int i = 0; i < size; i += 4096){
-        unsigned char blockHash[64];
-        SHA512((const unsigned char *)(buf+i), 4096, blockHash);
+    for(int i = 0; i < num_blocks; i++){
+        blockmeta *block = g_hash_table_lookup(ctx->blockIndex, blockHashes[i]);
         
-        char hexHash[129];
-        hash_to_hex(blockHash, hexHash);
-        
-        blockmeta *block = g_hash_table_lookup(ctx->blockIndex, hexHash);
         if (!block) {
-            block = g_malloc0(sizeof(blockmeta));
-            block->id = g_strdup(hexHash); // Duplicamos apenas se o bloco for novo
-            block->size = 4096;
-            block->counter = 0;
-            ticket_rwlock_init(&block->lock);
-            g_hash_table_insert(ctx->blockIndex, block->id, block);
+            ticket_rwlock_read_unlock(&ctx->block_index_lock);
+            ticket_rwlock_write_lock(&ctx->block_index_lock);
+            
+            block = g_hash_table_lookup(ctx->blockIndex, blockHashes[i]);
+            if (!block) {
+                block = g_malloc0(sizeof(blockmeta));
+                block->id = g_memdup2(blockHashes[i], 64);
+                block->size = 4096;
+                block->counter = 0;
+                ticket_rwlock_init(&block->lock);
+                g_hash_table_insert(ctx->blockIndex, block->id, block);
+            }
+            ticket_rwlock_write_unlock(&ctx->block_index_lock);
+            ticket_rwlock_read_lock(&ctx->block_index_lock);
         }
         
         if (!g_hash_table_lookup(lockedBlocks, block->id)) {
@@ -636,55 +662,56 @@ static int xmp_write(const char *path, const char *buf, size_t size,
         blockmeta *block = (blockmeta *)l->data;
         ticket_rwlock_write_lock(&block->lock);
     }
-    g_list_free(blocks_to_lock);
 
     pthread_mutex_lock(&ctx->freeList_lock);
+    pthread_mutex_lock(&ctx->offset_lock);
+
+    for (GList *l = blocks_to_lock; l != NULL; l = l->next) {
+        blockmeta *block = (blockmeta *)l->data;
+        if (block->counter == 0) {
+            if (!g_queue_is_empty(ctx->freeList)) {
+                off_t *poff = g_queue_pop_head(ctx->freeList);
+                block->block_offset = *poff;
+                g_free(poff);
+            } else {
+                block->block_offset = ctx->next_free_offset;
+                ctx->next_free_offset += block->size;
+            }
+        }
+    }
+
+    pthread_mutex_unlock(&ctx->offset_lock);
+    pthread_mutex_unlock(&ctx->freeList_lock);
+    ticket_rwlock_read_unlock(&ctx->block_index_lock);
+    ticket_rwlock_read_unlock(&ctx->file_index_lock);
+
     int err = 0;
     const char *buf_ptr = buf;
     while (!g_queue_is_empty(newBlocksInfo)) {
         blockmeta *block = g_queue_pop_head(newBlocksInfo);
         if (block->counter == 0) {
-            off_t blk_offset;
-            if (!g_queue_is_empty(ctx->freeList)) {
-                off_t *poff = g_queue_pop_head(ctx->freeList);
-                blk_offset = *poff;
-                g_free(poff);
-            } else {
-                pthread_mutex_lock(&ctx->offset_lock);
-                blk_offset = ctx->next_free_offset;
-                ctx->next_free_offset += block->size;
-                pthread_mutex_unlock(&ctx->offset_lock);
-            }
-            block->block_offset = blk_offset;
             if (ctx->backend_fd != -1) {
                 if (pwrite(ctx->backend_fd, buf_ptr, block->size, block->block_offset) == -1) err = -errno;
             }
-            file->realSize += block->size;
+            file->realSize += block->size; 
         }
-        block->counter++;
-        g_queue_push_tail(blockList, block);
+        block->counter++; 
+        g_ptr_array_add(blockList, block); 
         buf_ptr += 4096;
         if (err) break;
     }
     if (!err && offset + size > file->logicalSize) file->logicalSize = offset + size;
-    g_queue_free(newBlocksInfo);
-    pthread_mutex_unlock(&ctx->freeList_lock);
 
-    GHashTableIter b_iter;
-    gpointer b_key, b_value;
-    g_hash_table_iter_init(&b_iter, lockedBlocks);
-    
-    while (g_hash_table_iter_next(&b_iter, &b_key, &b_value)) {
-        ticket_rwlock_write_unlock(&((blockmeta *)b_value)->lock);
+    for (GList *l = blocks_to_lock; l != NULL; l = l->next) {
+        blockmeta *block = (blockmeta *)l->data;
+        ticket_rwlock_write_unlock(&block->lock);
     }
-    g_hash_table_destroy(lockedBlocks);
-    
-    printf("[WRITE] path: %s | offset: %ld | size_pedido: %zu | logicalSize_final: %ld\n", 
-           path, offset, size, file->logicalSize);
-
-    ticket_rwlock_write_unlock(&ctx->block_index_lock);
     ticket_rwlock_write_unlock(&file->lock);
-    ticket_rwlock_write_unlock(&ctx->file_index_lock);
+
+    g_list_free(blocks_to_lock);
+    g_hash_table_destroy(lockedBlocks);
+    g_queue_free(newBlocksInfo);
+    g_free(blockHashes);
 
     return err ? err : (int)size;
 }

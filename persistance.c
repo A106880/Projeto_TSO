@@ -78,14 +78,12 @@ static void save_file_entry(gpointer key, gpointer value, gpointer user_data) {
     if (write_int64(ctx->f, (int64_t)fm->realSize) != 0)            { ctx->error = 1; return; }
     if (write_int64(ctx->f, (int64_t)fm->logicalSize) != 0)         { ctx->error = 1; return; }
 
-    uint64_t nblocks = (uint64_t)g_queue_get_length(fm->blockList);
+    uint64_t nblocks = (uint64_t)fm->blockList->len;
     if (write_uint64(ctx->f, nblocks) != 0) { ctx->error = 1; return; }
 
-    GList *node = g_queue_peek_head_link(fm->blockList);
-    while (node) {
-        blockmeta *bm = (blockmeta *)node->data;
+    for (uint64_t i = 0; i < nblocks; i++) {
+        blockmeta *bm = (blockmeta *)g_ptr_array_index(fm->blockList, i);
         if (write_string(ctx->f, bm->id) != 0) { ctx->error = 1; return; }
-        node = node->next;
     }
 }
 
@@ -170,7 +168,7 @@ void load_metadata(GHashTable *fileIndex, GHashTable *blockIndex, GQueue *freeLi
         fm->id          = id;
         fm->realSize    = (off_t)realSize;
         fm->logicalSize = (off_t)logicalSize;
-        fm->blockList   = g_queue_new();
+        fm->blockList   = g_ptr_array_new();
         ticket_rwlock_init(&fm->lock);
 
         for (uint64_t j = 0; j < nfile_blocks; j++) {
@@ -181,7 +179,7 @@ void load_metadata(GHashTable *fileIndex, GHashTable *blockIndex, GQueue *freeLi
             g_free(block_id);
             if (!bm) { freeFilemeta(fm); goto err; }
 
-            g_queue_push_tail(fm->blockList, bm);
+            g_ptr_array_add(fm->blockList, bm);
         }
 
         g_hash_table_insert(fileIndex, fm->id, fm);

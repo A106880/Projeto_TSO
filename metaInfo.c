@@ -3,7 +3,7 @@
 void freeFilemeta(void *data){
     if (!data) return;
 	filemeta *file = (filemeta*)data;
-	g_queue_free(file->blockList); //value da block list é um apontador para blockmeta
+	g_ptr_array_free(file->blockList, TRUE); //liberta o array e os apontadores
     if (file->id) g_free(file->id);
     ticket_rwlock_destroy(&file->lock);
     g_free(file);
@@ -18,9 +18,12 @@ void freeBlockMeta(void *data){
 }
 
 guint blockHashFunc(gconstpointer key){
-    guint *value = (guint *) key;
-    guint finalKey = *value;
-    return finalKey;
+    const guint32 *p = (const guint32 *)key;
+    guint h = 0;
+    for (int i = 0; i < 4; i++) {
+        h ^= p[i];
+    }
+    return h;
 }
 
 gboolean compareSHAHashes(gconstpointer hash1, gconstpointer hash2){
