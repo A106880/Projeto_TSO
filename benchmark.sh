@@ -78,12 +78,13 @@ run_fio_test() {
 
     # Executar FIO
     if [[ "$FIO_EXTRA_ARGS" == *.fio ]]; then
-        local FIO_CMD="fio $FIO_EXTRA_ARGS --output-format=json --output=$FIO_OUTPUT"
+        local FIO_CMD="fio $FIO_EXTRA_ARGS --direct=1 --output-format=json --output=$FIO_OUTPUT"
     else
         local FIO_CMD="fio --name=$TEST_NAME \
             --directory=$MOUNTPOINT \
             --size=$FIO_SIZE \
             --bs=$FIO_BS \
+            --direct=1 \
             --numjobs=$FIO_NUMJOBS \
             --runtime=$FIO_RUNTIME \
             --time_based=0 \
@@ -175,6 +176,7 @@ create_dedup_fio_job() {
 directory=$MOUNTPOINT
 bs=$FIO_BS
 size=$FIO_SIZE
+direct=1
 numjobs=$FIO_NUMJOBS
 group_reporting
 dedupe_percentage=$DEDUP_PERCENT
@@ -222,7 +224,7 @@ rm -f "$MOUNTPOINT"/testfile_* 2>/dev/null || true
 JOB="$RESULTS_DIR/precreate.fio"
 create_dedup_fio_job "$JOB" 0 "write"
 echo "  A pré-criar ficheiro para testes de leitura..."
-fio "$JOB" --output=/dev/null 2>/dev/null || true
+fio "$JOB" --direct=1 --output=/dev/null 2>/dev/null || true
 
 # Teste 4: Leitura sequencial
 # NOVO: Passamos "no" no último argumento para NÃO apagar o testfile_dedup0
@@ -238,6 +240,7 @@ cat > "$JOB" << EOF
 directory=$MOUNTPOINT
 bs=$FIO_BS
 size=16M
+direct=1
 group_reporting
 dedupe_percentage=50
 ioengine=psync

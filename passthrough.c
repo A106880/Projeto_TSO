@@ -107,7 +107,7 @@ static void *xmp_init(struct fuse_conn_info *conn,
 	pthread_mutex_init(&ctx->freeList_lock, NULL);
 	pthread_mutex_init(&ctx->offset_lock, NULL);
 
-    ctx->backend_fd = open("/backend/data.bin", O_RDWR | O_CREAT, 0644);
+    ctx->backend_fd = open("/backend/data.bin", O_RDWR | O_CREAT | O_DIRECT, 0644);
     if (ctx->backend_fd != -1) {
         struct stat st;
         if (fstat(ctx->backend_fd, &st) == 0) {
@@ -431,7 +431,7 @@ static int xmp_create(const char *path, mode_t mode,
 	printf("[Thread %d] Create for path %s, userid %d, pid %d\n", gettid(), path, f_ctx->uid, f_ctx->pid);
 #endif
 
-	res = open(path, fi->flags, mode);
+	res = open(path, fi->flags | O_DIRECT, mode);
 	if (res == -1)
 		return -errno;
 
@@ -480,7 +480,7 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
 	printf("[Thread %d] Open for path %s, userid %d, pid %d\n", gettid(), path, f_ctx->uid, f_ctx->pid);
 #endif
 
-	res = open(path, fi->flags);
+	res = open(path, fi->flags | O_DIRECT);
 	if (res == -1)
 		return -errno;
 
@@ -768,7 +768,7 @@ static int xmp_fallocate(const char *path, int mode,
 		return -EOPNOTSUPP;
 
 	if(fi == NULL)
-		fd = open(path, O_WRONLY);
+		fd = open(path, O_WRONLY | O_DIRECT);
 	else
 		fd = fi->fh;
 	
@@ -831,7 +831,7 @@ static ssize_t xmp_copy_file_range(const char *path_in,
 	ssize_t res;
 
 	if(fi_in == NULL)
-		fd_in = open(path_in, O_RDONLY);
+		fd_in = open(path_in, O_RDONLY | O_DIRECT);
 	else
 		fd_in = fi_in->fh;
 
@@ -839,7 +839,7 @@ static ssize_t xmp_copy_file_range(const char *path_in,
 		return -errno;
 
 	if(fi_out == NULL)
-		fd_out = open(path_out, O_WRONLY);
+		fd_out = open(path_out, O_WRONLY | O_DIRECT);
 	else
 		fd_out = fi_out->fh;
 
@@ -868,7 +868,7 @@ static off_t xmp_lseek(const char *path, off_t off, int whence, struct fuse_file
 	off_t res;
 
 	if (fi == NULL)
-		fd = open(path, O_RDONLY);
+		fd = open(path, O_RDONLY | O_DIRECT);
 	else
 		fd = fi->fh;
 
