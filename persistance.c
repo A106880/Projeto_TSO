@@ -49,6 +49,19 @@ static char *read_string(FILE *f) {
     return s;
 }
 
+static int write_hash(FILE *f, const char *h) {
+    return write_bytes(f, h, 64);
+}
+
+static char *read_hash(FILE *f) {
+    char *h = g_malloc0(64);
+    if (read_bytes(f, h, 64) != 0) {
+        g_free(h);
+        return NULL;
+    }
+    return h;
+}
+
 typedef struct {
     FILE *f;
     int   error;
@@ -61,7 +74,7 @@ static void save_block_entry(gpointer key, gpointer value, gpointer user_data) {
     (void)key;
     blockmeta *bm = (blockmeta *)value;
 
-    if (write_string(ctx->f, bm->id) != 0)                      { ctx->error = 1; return; }
+    if (write_hash(ctx->f, bm->id) != 0)                        { ctx->error = 1; return; }
     if (write_uint64(ctx->f, (uint64_t)bm->size) != 0)          { ctx->error = 1; return; }
     if (write_int64(ctx->f, (int64_t)bm->block_offset) != 0)    { ctx->error = 1; return; }
     if (write_uint64(ctx->f, (uint64_t)bm->counter) != 0)       { ctx->error = 1; return; }
@@ -83,7 +96,7 @@ static void save_file_entry(gpointer key, gpointer value, gpointer user_data) {
 
     for (uint64_t i = 0; i < nblocks; i++) {
         blockmeta *bm = (blockmeta *)g_ptr_array_index(fm->blockList, i);
-        if (write_string(ctx->f, bm->id) != 0) { ctx->error = 1; return; }
+        if (write_hash(ctx->f, bm->id) != 0) { ctx->error = 1; return; }
     }
 }
 
@@ -129,7 +142,7 @@ void load_metadata(GHashTable *fileIndex, GHashTable *blockIndex, GQueue *freeLi
     if (read_uint64(f, &nblocks) != 0) { fclose(f); return; }
 
     for (uint64_t i = 0; i < nblocks; i++) {
-        char *id = read_string(f);
+        char *id = read_hash(f);
         if (!id) goto err;
 
         uint64_t bsize;
@@ -172,7 +185,7 @@ void load_metadata(GHashTable *fileIndex, GHashTable *blockIndex, GQueue *freeLi
         ticket_rwlock_init(&fm->lock);
 
         for (uint64_t j = 0; j < nfile_blocks; j++) {
-            char *block_id = read_string(f);
+            char *block_id = read_hash(f);
             if (!block_id) { freeFilemeta(fm); goto err; }
 
             blockmeta *bm = g_hash_table_lookup(blockIndex, block_id);

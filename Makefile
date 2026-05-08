@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS= -Wall
+CFLAGS= -Wall -g
 DEPS = metaInfo.h persistance.h ticket_rwlock.h
 OBJ = passthrough.o metaInfo.o persistance.o ticket_rwlock.o
 

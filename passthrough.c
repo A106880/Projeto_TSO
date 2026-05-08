@@ -141,6 +141,14 @@ static void xmp_destroy(void* private_data){
 	if (p_ctx->freeList) {
         g_queue_free_full(p_ctx->freeList, g_free); 
     }
+    
+    if (p_ctx->fileIndex) {
+        g_hash_table_destroy(p_ctx->fileIndex);
+    }
+    
+    if (p_ctx->blockIndex) {
+        g_hash_table_destroy(p_ctx->blockIndex);
+    }
 
     printf("[Thread %d] Destroy called, userid %d, pid %d\n", gettid(), f_ctx->uid, f_ctx->pid);
 	printf("[Thread %d] Open() - %lu\n", gettid(), p_ctx->open);
@@ -591,7 +599,7 @@ static int xmp_write(const char *path, const char *buf, size_t size,
     if (size % 4096 != 0) return -EINVAL;
 
     int num_blocks = size / 4096;
-    unsigned char (*blockHashes)[64] = g_malloc(num_blocks * 64);
+    unsigned char (*blockHashes)[64] = g_malloc0(num_blocks * 64);
     for(int i = 0; i < num_blocks; i++) {
         SHA512((const unsigned char *)(buf + i * 4096), 4096, blockHashes[i]);
     }
