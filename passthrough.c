@@ -695,11 +695,19 @@ static int xmp_write(const char *path, const char *buf, size_t size,
 
     int err = 0;
     const char *buf_ptr = buf;
+
+    void *aligned_block;
+    if (posix_memalign(&aligned_block, 4096, 4096) != 0) {
+        err = -ENOMEM;
+        goto write_cleanup;
+    }
+
     while (!g_queue_is_empty(newBlocksInfo)) {
         blockmeta *block = g_queue_pop_head(newBlocksInfo);
         if (block->counter == 0) {
             if (ctx->backend_fd != -1) {
-                if (pwrite(ctx->backend_fd, buf_ptr, block->size, block->block_offset) == -1) err = -errno;
+                memcpy(aligned_block, buf_ptr, block->size);
+                if (pwrite(ctx->backend_fd, aligned_block, block->size, block->block_offset) == -1) err = -errno;
             }
             file->realSize += block->size; 
         }
@@ -708,6 +716,10 @@ static int xmp_write(const char *path, const char *buf, size_t size,
         buf_ptr += 4096;
         if (err) break;
     }
+    
+    free(aligned_block);
+
+write_cleanup:
     if (!err && offset + size > file->logicalSize) file->logicalSize = offset + size;
 
     for (GList *l = blocks_to_lock; l != NULL; l = l->next) {
