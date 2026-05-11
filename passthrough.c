@@ -180,7 +180,7 @@ static int xmp_getattr(const char *path, struct stat *stbuf,
 	}
 
     printf("[GETATTR] path: %s | tamanho_fisico: %ld | tamanho_logico: %ld\n", 
-        path, stbuf->st_size, file ? file->logicalSize : -1);
+        path, stbuf->st_size, file ? file->logicalSize : stbuf->st_size);
 	ticket_rwlock_read_unlock(&ctx->file_index_lock);
 
 	return 0;
