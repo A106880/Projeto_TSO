@@ -557,8 +557,24 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
         }
 
         if (ctx->backend_fd != -1) {
-            ssize_t ret = pread(ctx->backend_fd, buf_ptr, bytes_to_read, block->block_offset + read_start_in_block);
-            if (ret == -1) { err = -errno; break; }
+            void *buffer_alinhado;
+            if (posix_memalign(&buffer_alinhado, 4096, 4096) != 0) {
+                err = -ENOMEM;
+                break;
+            }
+
+            ssize_t ret = pread(ctx->backend_fd, buffer_alinhado, 4096, block->block_offset);
+            
+            if (ret == -1) { 
+                err = -errno; 
+                free(buffer_alinhado);
+                break; 
+            }
+
+            memcpy(buf_ptr, (char *)buffer_alinhado + read_start_in_block, bytes_to_read);
+
+            free(buffer_alinhado);
+
         } else { 
             err = -EBADF; 
             break; 
@@ -566,7 +582,7 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 
         buf_ptr += bytes_to_read;
         total_bytes_read += bytes_to_read;
-    }   
+    }      
 
     GHashTableIter b_iter;
     gpointer b_key, b_value;
