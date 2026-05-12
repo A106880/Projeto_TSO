@@ -6,7 +6,7 @@
 
 #define PERSISTENCE_FILE "/backend/.metadata"
 
-void save_metadata(GHashTable *fileIndex, GHashTable *blockIndex, GQueue *freeList, off_t next_free_offset);
-void load_metadata(GHashTable *fileIndex, GHashTable *blockIndex, GQueue *freeList, off_t *next_free_offset);
+void save_metadata(GHashTable *fileIndex, GHashTable *blockIndex, GArray *freeList, off_t next_free_offset);
+void load_metadata(GHashTable *fileIndex, GHashTable *blockIndex, GArray *freeList, off_t *next_free_offset);
 
 #endif

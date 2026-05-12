@@ -64,7 +64,7 @@ typedef struct context {
 	GHashTable *blockIndex;
     ticket_rwlock_t file_index_lock;
     ticket_rwlock_t block_index_lock;
-	GQueue *freeList;
+    GArray *freeList;
     pthread_mutex_t freeList_lock;
     
     int backend_fd;
@@ -100,7 +100,7 @@ static void *xmp_init(struct fuse_conn_info *conn,
 	ctx->open=0;
 	ctx->blockIndex = g_hash_table_new_full(blockHashFunc,compareSHAHashes,NULL,freeBlockMeta);
 	ctx->fileIndex = g_hash_table_new_full(g_str_hash,g_str_equal,NULL,freeFilemeta);
-	ctx->freeList = g_queue_new();
+	ctx->freeList = g_array_new(FALSE, FALSE, sizeof(off_t));
 
 	ticket_rwlock_init(&ctx->file_index_lock);
 	ticket_rwlock_init(&ctx->block_index_lock);
@@ -139,7 +139,7 @@ static void xmp_destroy(void* private_data){
     if (p_ctx->backend_fd != -1) close(p_ctx->backend_fd);
 
 	if (p_ctx->freeList) {
-        g_queue_free_full(p_ctx->freeList, g_free); 
+        g_array_free(p_ctx->freeList, TRUE); 
     }
     
     if (p_ctx->fileIndex) {
@@ -302,9 +302,7 @@ static int xmp_unlink(const char *path)
         blockmeta *block = (blockmeta *)g_ptr_array_index(blockList, i);
         block->counter--;
         if (block->counter == 0) {
-            off_t *freed_offset = g_malloc(sizeof(off_t));
-            *freed_offset = block->block_offset;
-            g_queue_push_tail(ctx->freeList, freed_offset);
+            g_array_append_val(ctx->freeList, block->block_offset);
             ticket_rwlock_write_unlock(&block->lock);
             g_hash_table_remove(uniqueBlocks, block->id);
             g_hash_table_remove(ctx->blockIndex, block->id);
@@ -652,7 +650,7 @@ static int xmp_write(const char *path, const char *buf, size_t size,
 
     GPtrArray *blockList = file->blockList;
     GHashTable *lockedBlocks = g_hash_table_new(blockHashFunc, compareSHAHashes);
-    GQueue *newBlocksInfo = g_queue_new();
+    GPtrArray *newBlocksInfo = g_ptr_array_new();
 
     for(int i = 0; i < num_blocks; i++){
         blockmeta *block = g_hash_table_lookup(ctx->blockIndex, blockHashes[i]);
@@ -677,7 +675,7 @@ static int xmp_write(const char *path, const char *buf, size_t size,
         if (!g_hash_table_lookup(lockedBlocks, block->id)) {
             g_hash_table_insert(lockedBlocks, block->id, block);
         }
-        g_queue_push_tail(newBlocksInfo, block);
+        g_ptr_array_add(newBlocksInfo, block);
     }
 
     GList *blocks_to_lock = g_hash_table_get_values(lockedBlocks);
@@ -693,11 +691,10 @@ static int xmp_write(const char *path, const char *buf, size_t size,
     for (GList *l = blocks_to_lock; l != NULL; l = l->next) {
         blockmeta *block = (blockmeta *)l->data;
         if (block->counter == 0) {
-            if (!g_queue_is_empty(ctx->freeList)) {
-                off_t *poff = g_queue_pop_head(ctx->freeList);
-                block->block_offset = *poff;
-                g_free(poff);
-            } else {
+            if (ctx->freeList->len > 0) {
+      			block->block_offset = g_array_index(ctx->freeList, off_t, ctx->freeList->len - 1);
+				g_array_remove_index(ctx->freeList, ctx->freeList->len - 1);
+			} else {
                 block->block_offset = ctx->next_free_offset;
                 ctx->next_free_offset += block->size;
             }
@@ -718,8 +715,8 @@ static int xmp_write(const char *path, const char *buf, size_t size,
         goto write_cleanup;
     }
 
-    while (!g_queue_is_empty(newBlocksInfo)) {
-        blockmeta *block = g_queue_pop_head(newBlocksInfo);
+    for (guint i = 0; i < newBlocksInfo->len; i++) {
+        blockmeta *block = g_ptr_array_index(newBlocksInfo, i);
         if (block->counter == 0) {
             if (ctx->backend_fd != -1) {
                 memcpy(aligned_block, buf_ptr, block->size);
@@ -746,7 +743,7 @@ write_cleanup:
 
     g_list_free(blocks_to_lock);
     g_hash_table_destroy(lockedBlocks);
-    g_queue_free(newBlocksInfo);
+    g_ptr_array_free(newBlocksInfo, TRUE);
     g_free(blockHashes);
 
     return err ? err : (int)size;

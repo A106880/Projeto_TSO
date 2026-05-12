@@ -100,7 +100,7 @@ static void save_file_entry(gpointer key, gpointer value, gpointer user_data) {
     }
 }
 
-void save_metadata(GHashTable *fileIndex, GHashTable *blockIndex, GQueue *freeList, off_t next_free_offset) {
+void save_metadata(GHashTable *fileIndex, GHashTable *blockIndex, GArray *freeList, off_t next_free_offset) {
     FILE *f = fopen(PERSISTENCE_FILE, "wb");
     if (!f) return;
 
@@ -118,19 +118,17 @@ void save_metadata(GHashTable *fileIndex, GHashTable *blockIndex, GQueue *freeLi
     g_hash_table_foreach(fileIndex, save_file_entry, &ctx);
     if (ctx.error) { fclose(f); return; }
 
-    uint64_t nfree = (uint64_t)g_queue_get_length(freeList);
+    uint64_t nfree = (uint64_t)freeList->len;
     if (write_uint64(f, nfree) != 0) { fclose(f); return; }
-    GList *node = g_queue_peek_head_link(freeList);
-    while (node) {
-        off_t *off = (off_t *)node->data;
-        if (write_int64(f, (int64_t)*off) != 0) { fclose(f); return; }
-        node = node->next;
+    for (guint i = 0; i < freeList->len; i++) {
+        off_t off = g_array_index(freeList, off_t, i);
+        if (write_int64(f, (int64_t)off) != 0) { fclose(f); return; }
     }
 
     fclose(f);
 }
 
-void load_metadata(GHashTable *fileIndex, GHashTable *blockIndex, GQueue *freeList, off_t *next_free_offset) {
+void load_metadata(GHashTable *fileIndex, GHashTable *blockIndex, GArray *freeList, off_t *next_free_offset) {
     FILE *f = fopen(PERSISTENCE_FILE, "rb");
     if (!f) return;
 
@@ -204,9 +202,8 @@ void load_metadata(GHashTable *fileIndex, GHashTable *blockIndex, GQueue *freeLi
     for (uint64_t i = 0; i < nfree; i++) {
         int64_t off;
         if (read_int64(f, &off) != 0) goto err;
-        off_t *poff = g_malloc(sizeof(off_t));
-        *poff = (off_t)off;
-        g_queue_push_tail(freeList, poff);
+        off_t poff = (off_t)off;
+        g_array_append_val(freeList, poff);
     }
 
     fclose(f);
