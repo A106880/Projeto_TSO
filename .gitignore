@@ -56,3 +56,12 @@ dkms.conf
 
 
 .vscode/
+
+/benchmark_results
+/codebase
+
+passthrough
+passthrough_base
+passthrough_dedup
+syscounter/syscounter
+systracer/systracer
