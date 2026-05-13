@@ -68,6 +68,7 @@ int event_handler(void *ctx, void *data, size_t data_sz)
 		printf("%-6d %-16s %-16s %-16s %-64s\n", m->pid, m->command, syscall_name, type, m->filename);
 	}
 
+	fflush(stdout);
 	return 0;
 }
 
@@ -79,8 +80,9 @@ int main(int argc, char *argv[])
 	struct ring_buffer *events = NULL;
 
 
-	/* Cleaner handling of Ctrl-C */
+	/* Cleaner handling of Ctrl-C and SIGTERM */
 	signal(SIGINT, sig_handler);
+	signal(SIGTERM, sig_handler);
 
 	/* Load & verify BPF programs */
 	skel = systracer_bpf__open_and_load();
@@ -146,5 +148,6 @@ int main(int argc, char *argv[])
 	cleanup:
 	systracer_bpf__destroy(skel);
 
+	fflush(stdout);
 	return err < 0 ? -err : 0;
 }

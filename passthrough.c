@@ -179,8 +179,8 @@ static int xmp_getattr(const char *path, struct stat *stbuf,
         ticket_rwlock_read_unlock(&file->lock);
 	}
 
-    printf("[GETATTR] path: %s | tamanho_fisico: %ld | tamanho_logico: %ld\n", 
-        path, stbuf->st_size, file ? file->logicalSize : stbuf->st_size);
+    // printf("[GETATTR] path: %s | tamanho_fisico: %ld | tamanho_logico: %ld\n", 
+        // path, stbuf->st_size, file ? file->logicalSize : stbuf->st_size);
 	ticket_rwlock_read_unlock(&ctx->file_index_lock);
 
 	return 0;
@@ -297,7 +297,7 @@ static int xmp_unlink(const char *path)
         block->counter -= ocorrencias_neste_ficheiro;
 
         if (block->counter == 0) {
-            g_hash_table_remove(ctx->blockIndex, block->id);
+            g_hash_table_steal(ctx->blockIndex, block->id);
             
             pthread_mutex_lock(&ctx->freeList_lock);
             g_array_append_val(ctx->freeList, block->block_offset);
@@ -502,8 +502,8 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
         return -ENOENT;
     }
     ticket_rwlock_read_lock(&file->lock);
-    printf("[READ] path: %s | offset_pedido: %ld | size_pedido: %zu | logicalSize: %ld\n", 
-            path, offset, size, file->logicalSize);
+    // printf("[READ] path: %s | offset_pedido: %ld | size_pedido: %zu | logicalSize: %ld\n", 
+            // path, offset, size, file->logicalSize);
     ticket_rwlock_read_unlock(&ctx->file_index_lock); 
 
     if (offset >= file->logicalSize) {
@@ -587,13 +587,6 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
     ticket_rwlock_read_unlock(&file->lock);
 
     return err ? err : (int)total_bytes_read;
-}
-
-static void hash_to_hex(const unsigned char *hash, char *hex_str) {
-    for (int i = 0; i < 64; i++) {
-        sprintf(hex_str + (i * 2), "%02x", hash[i]);
-    }
-    hex_str[128] = '\0';
 }
 
 static int xmp_write(const char *path, const char *buf, size_t size,
