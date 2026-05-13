@@ -160,6 +160,9 @@ static void xmp_destroy(void* private_data){
 static int xmp_getattr(const char *path, struct stat *stbuf,
 		       struct fuse_file_info *fi)
 {
+	if (strcmp(path, "/.metadata") == 0 || strcmp(path, "/data.bin") == 0) {
+        return -ENOENT;
+    }
 	(void) fi;
 	int res;
     
@@ -227,6 +230,9 @@ static int xmp_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 		return -errno;
 
 	while ((de = readdir(dp)) != NULL) {
+		if (strcmp(de->d_name, ".metadata") == 0 || strcmp(de->d_name, "data.bin") == 0) {
+			continue;
+		}
 		struct stat st;
 		memset(&st, 0, sizeof(st));
 		st.st_ino = de->d_ino;
