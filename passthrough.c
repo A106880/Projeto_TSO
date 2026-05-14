@@ -107,7 +107,7 @@ static void *xmp_init(struct fuse_conn_info *conn,
 	pthread_mutex_init(&ctx->freeList_lock, NULL);
 	pthread_mutex_init(&ctx->offset_lock, NULL);
 
-    ctx->backend_fd = open("/backend/data.bin", O_RDWR | O_CREAT | O_DIRECT, 0644);
+    ctx->backend_fd = open("/backend/.sysdata", O_RDWR | O_CREAT | O_DIRECT, 0644);
     if (ctx->backend_fd != -1) {
         struct stat st;
         if (fstat(ctx->backend_fd, &st) == 0) {
@@ -160,7 +160,7 @@ static void xmp_destroy(void* private_data){
 static int xmp_getattr(const char *path, struct stat *stbuf,
 		       struct fuse_file_info *fi)
 {
-	if (strcmp(path, "/.metadata") == 0 || strcmp(path, "/data.bin") == 0) {
+	if (strcmp(path, "/.metadata") == 0 || strcmp(path, "/.sysdata") == 0) {
         return -ENOENT;
     }
 	(void) fi;
@@ -230,7 +230,7 @@ static int xmp_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 		return -errno;
 
 	while ((de = readdir(dp)) != NULL) {
-		if (strcmp(de->d_name, ".metadata") == 0 || strcmp(de->d_name, "data.bin") == 0) {
+		if (strcmp(de->d_name, ".metadata") == 0 || strcmp(de->d_name, ".sysdata") == 0) {
 			continue;
 		}
 		struct stat st;
@@ -258,6 +258,9 @@ static int xmp_mknod(const char *path, mode_t mode, dev_t rdev)
 
 static int xmp_unlink(const char *path)
 {
+	if (strcmp(path, "/.metadata") == 0 || strcmp(path, "/.sysdata") == 0) {
+	    return -EPERM;
+	}
     struct fuse_context *f_ctx = fuse_get_context();
     Context *ctx = (Context *) f_ctx->private_data;
 
@@ -338,6 +341,10 @@ static int xmp_symlink(const char *from, const char *to)
 
 static int xmp_rename(const char *from, const char *to, unsigned int flags)
 {
+	if (strcmp(from, "/.metadata") == 0 || strcmp(from, "/.sysdata") == 0 ||
+	    strcmp(to, "/.metadata") == 0 || strcmp(to, "/.sysdata") == 0) {
+	    return -EPERM;
+	}
 	int res;
 
 	if (flags)
@@ -421,6 +428,9 @@ static int xmp_utimens(const char *path, const struct timespec ts[2],
 static int xmp_create(const char *path, mode_t mode,
 		      struct fuse_file_info *fi)
 {
+	if (strcmp(path, "/.metadata") == 0 || strcmp(path, "/.sysdata") == 0) {
+	    return -EACCES;
+	}
 	int res;
 
 #ifdef DEBUG
@@ -470,6 +480,9 @@ static int xmp_rmdir(const char *path){
 
 static int xmp_open(const char *path, struct fuse_file_info *fi)
 {
+	if (strcmp(path, "/.metadata") == 0 || strcmp(path, "/.sysdata") == 0) {
+	    return -EACCES;
+	}
 	int res;
 
 #ifdef DEBUG

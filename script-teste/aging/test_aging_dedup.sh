@@ -37,6 +37,7 @@ cleanup_env() {
     sudo fusermount3 -u "$MOUNTPOINT" 2>/dev/null || true
     sudo rm -rf "$BACKEND"/*
     sudo rm "$BACKEND"/.metadata || true
+    sudo rm "$BACKEND"/.sysdata || true
     sudo rm -rf "$MOUNTPOINT"/* 2>/dev/null || true
 }
 
@@ -100,7 +101,7 @@ run_aging_test() {
         --time_based \
         --runtime=60 \
         --group_reporting \
-        --eta=never > "$OUT_FILE" 2>&1
+        --eta-interval=1 \
 
     # Stop Monitor
     if [ -n "$PERF_PID" ]; then 

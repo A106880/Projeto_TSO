@@ -37,6 +37,7 @@ cleanup_env() {
     sudo fusermount3 -u "$MOUNTPOINT" 2>/dev/null || true
     sudo rm -rf "$BACKEND"/*
     sudo rm "$BACKEND"/.metadata || true
+    sudo rm "$BACKEND"/.sysdata || true
     sudo rm -rf "$MOUNTPOINT"/* 2>/dev/null || true
 }
 
@@ -71,15 +72,9 @@ run_phase3_reclamation() {
     cleanup_env
     mount_fuse "$FUSE_BINARY_DEDUP"
 
-    local PERF_OUT="$RESULTS_DIR/reclamation_perf.data"
-    local PERF_PID=""
-    echo "  [Profiling] Starting perf record..."
-    sudo perf record -F 99 -g -p "$FUSE_PID" -o "$PERF_OUT" -- sleep 10 > /dev/null 2>&1 &
-    PERF_PID=$!
-
     # Step 1: Initial Fill (Dataset A)
     echo "  [Step 1] Writing 500MB of unique data (Dataset A)..."
-    fio --name=dataset_A --directory="$MOUNTPOINT" --size=500M --bs=4k --direct=1 --fallocate=none --rw=write --ioengine=psync --dedupe_percentage=0 --output=/dev/null
+    fio --name=dataset_A --directory="$MOUNTPOINT" --size=500M --bs=4k --direct=1 --fallocate=none --rw=write --ioengine=psync --dedupe_percentage=0 --output=/dev/null --status-interval=1 --eta-interval=1
     
     local SIZE_BEFORE=$(sudo du -sb "$BACKEND" | awk '{print $1}')
     echo "  Physical size after Dataset A: $SIZE_BEFORE bytes"
@@ -92,14 +87,10 @@ run_phase3_reclamation() {
 
     # Step 3: Refill (Dataset B)
     echo "  [Step 3] Writing another 500MB of unique data (Dataset B)..."
-    fio --name=dataset_B --directory="$MOUNTPOINT" --size=500M --bs=4k --direct=1 --fallocate=none --rw=write --ioengine=psync --dedupe_percentage=0 --output=/dev/null
+    fio --name=dataset_B --directory="$MOUNTPOINT" --size=500M --bs=4k --direct=1 --fallocate=none --rw=write --ioengine=psync --dedupe_percentage=0 --output=/dev/null --status-interval=1 --eta-interval=1
     
     local SIZE_AFTER=$(sudo du -sb "$BACKEND" | awk '{print $1}')
     echo "  Physical size after Dataset B: $SIZE_AFTER bytes"
-
-    if [ -n "$PERF_PID" ]; then 
-        wait "$PERF_PID" 2>/dev/null || true
-    fi
 
     # Step 4: Verification
     echo ""

@@ -46,6 +46,7 @@ cleanup_env() {
     sudo fusermount3 -u "$MOUNTPOINT" 2>/dev/null || true
     sudo rm -rf "$BACKEND"/*
     sudo rm "$BACKEND"/.metadata || true
+    sudo rm "$BACKEND"/.sysdata || true
     sudo rm -rf "$MOUNTPOINT"/* 2>/dev/null || true
 }
 
@@ -106,6 +107,7 @@ run_fio_test() {
     # 2. Run FIO
     echo "  Executing FIO ($RW_TYPE)..."
     fio --name="$TEST_NAME" \
+        --eta-interval=1 \
         --directory="$MOUNTPOINT" \
         --size="$FIO_SIZE" \
         --bs="$FIO_BS" \
@@ -132,6 +134,8 @@ run_fio_test() {
     wait "$ST_PID" 2>/dev/null || true
 
     echo "  Test $TEST_ID completed."
+    echo "Real size on backend: $(sudo du -sh /backend/.sysdata)"
+    echo "Logical space seen on mountpoint: $(du -sh "$MOUNTPOINT" | awk '{print $1}')"
 }
 
 # ======================== EXECUTION ========================

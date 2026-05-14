@@ -46,6 +46,7 @@ cleanup_env() {
     sudo fusermount3 -u "$MOUNTPOINT" 2>/dev/null || true
     sudo rm -rf "$BACKEND"/*
     sudo rm "$BACKEND"/.metadata || true
+    sudo rm "$BACKEND"/.sysdata || true
     sudo rm -rf "$MOUNTPOINT"/* 2>/dev/null || true
 }
 
@@ -117,7 +118,8 @@ run_fio_test() {
         --numjobs="$NUM_JOBS" \
         --group_reporting \
         --output-format=json \
-        --output="$FIO_OUT"
+        --output="$FIO_OUT" \
+        --eta-interval=1
 
     # 3. Stop Monitors
     if [ -n "$PERF_PID" ]; then 
@@ -142,7 +144,7 @@ cleanup_env
 mount_fuse "$FUSE_BINARY_DEDUP"
 
 echo "  [Pre-fill] Writing data for read test..."
-fio --name="prefill" --directory="$MOUNTPOINT" --size="$FIO_SIZE" --bs="$FIO_BS" --direct=1 --fallocate=none --rw=write --output=/dev/null
+fio --name="prefill" --directory="$MOUNTPOINT" --size="$FIO_SIZE" --bs="$FIO_BS" --direct=1 --fallocate=none --rw=write --output=/dev/null --status-interval=1 --eta-interval=1
 
 echo "  [Cold Cache Cycle] Unmounting and remounting..."
 sudo fusermount3 -u "$MOUNTPOINT" 2>/dev/null || true
