@@ -13,7 +13,7 @@ ANALYSERS = {
     "_systracer.txt": "systracer_analyser.py"
 }
 
-def run_analyse():
+def run_analysis():
     if not os.path.exists(RESULTS_DIR):
         print(f"Error: Directory {RESULTS_DIR} not found.")
         return
@@ -88,4 +88,4 @@ def run_analyse():
     print("\nProcessing completed.")
 
 if __name__ == "__main__":
-    run_analyse()
+    run_analysis()

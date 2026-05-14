@@ -58,7 +58,6 @@ dkms.conf
 .vscode/
 
 /benchmark_results
-/codebase
 
 passthrough
 passthrough_base

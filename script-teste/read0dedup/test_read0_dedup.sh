@@ -10,7 +10,7 @@ if [ "${USE_ALL:-false}" = "true" ]; then
     USE_FIO=true; USE_SYSCOUNTER=true; USE_SYSTRACER=true; USE_PIDSTAT=true; USE_PERF=true
 fi
 
-# ======================== CONFIGURATION ========================
+# CONFIGURATION
 PROJECT_ROOT=$(pwd)
 MOUNTPOINT="/mnt/fs"
 BACKEND="/backend"
@@ -36,12 +36,12 @@ limpar_no_fim() {
 
 trap limpar_no_fim EXIT SIGINT SIGTERM
 
-# ======================== PREPARATION ========================
+# PREPARATION
 mkdir -p "$RESULTS_DIR"
 sudo mkdir -p "$BACKEND"
 sudo chown $USER:$USER "$BACKEND"
 
-# ======================== HELPER FUNCTIONS ========================
+# HELPER FUNCTIONS
 
 compile_dedup() {
     echo "--- Compiling Deduplication Passthrough ---"
@@ -153,7 +153,7 @@ run_fio_test() {
     echo "  Test $TEST_ID completed."
 }
 
-# ======================== EXECUTION ========================
+# EXECUTION
 sudo pkill -9 -f "[p]assthrough_dedup" || true
 sudo fusermount3 -u "$MOUNTPOINT" 2>/dev/null || true
 

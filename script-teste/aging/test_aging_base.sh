@@ -1,8 +1,7 @@
 #!/bin/bash
 set -e
 
-# ======================== OBSERVABILITY TOGGLES ========================
-# Por defeito, tudo FALSE. Para ativar, corre: USE_PIDSTAT=true ./script.sh
+# OBSERVABILITY TOGGLES
 USE_PIDSTAT=${USE_PIDSTAT:-false}
 USE_PERF=${USE_PERF:-false}
 
@@ -10,15 +9,14 @@ if [ "${USE_ALL:-false}" = "true" ]; then
     USE_PIDSTAT=true; USE_PERF=true
 fi
 
-# ======================== CONFIGURATION ========================
+# CONFIGURATION
 PROJECT_ROOT=$(pwd)
 MOUNTPOINT="/mnt/fs"
 BACKEND="/backend"
 RESULTS_DIR="$PROJECT_ROOT/benchmark_results/$(basename "$0" .sh)"
 FUSE_BINARY_BASE="$PROJECT_ROOT/passthrough_base"
 
-# Função de limpeza automática
-limpar_no_fim() {
+cleanup() {
     echo ""
     echo "  [Shutdown] Unmounting FUSE and cleaning up..."
     sudo fusermount3 -u "$MOUNTPOINT" 2>/dev/null || true
@@ -27,13 +25,12 @@ limpar_no_fim() {
 
 trap limpar_no_fim EXIT SIGINT SIGTERM
 
-# ======================== PREPARATION ========================
+# PREPARATION
 mkdir -p "$RESULTS_DIR"
 sudo mkdir -p "$BACKEND"
 sudo chown $USER:$USER "$BACKEND"
 
-# ======================== HELPER FUNCTIONS ========================
-
+# HELPER FUNCTIONS
 compile_base() {
     echo "--- Compiling Original Passthrough (Baseline) ---"
     gcc codebase/skeleton/passthrough.c -o "$FUSE_BINARY_BASE" `pkg-config fuse3 --cflags --libs`
@@ -55,10 +52,8 @@ mount_fuse() {
     { sudo "$BINARY" "$MOUNTPOINT" -omodules="subdir,subdir=$BACKEND" -oallow_other -f > "$RESULTS_DIR/fuse_log.txt" 2>&1 & } 2>/dev/null
     sleep 2
     
-    # Tenta pidof primeiro (mais preciso para o binário real)
     FUSE_PID=$(pidof -s "$BIN_NAME")
     
-    # Se falhar, usa pgrep -n (newest) para ignorar o processo sudo mais antigo
     if [ -z "$FUSE_PID" ]; then
         FUSE_PID=$(pgrep -n -f "$BINARY")
     fi
@@ -128,7 +123,7 @@ run_aging_test() {
     echo "  Phase 2 completed for $VERSION_NAME."
 }
 
-# ======================== EXECUTION ========================
+# EXECUTION
 sudo pkill -9 -f "[p]assthrough_base" || true
 sudo fusermount3 -u "$MOUNTPOINT" 2>/dev/null || true
 
