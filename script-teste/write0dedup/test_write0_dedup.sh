@@ -1,5 +1,14 @@
 #!/bin/bash
 set -e
+USE_FIO=${USE_FIO:-false}
+USE_SYSCOUNTER=${USE_SYSCOUNTER:-false}
+USE_SYSTRACER=${USE_SYSTRACER:-false}
+USE_PIDSTAT=${USE_PIDSTAT:-false}
+USE_PERF=${USE_PERF:-false}
+   
+if [ "${USE_ALL:-false}" = "true" ]; then
+    USE_FIO=true; USE_SYSCOUNTER=true; USE_SYSTRACER=true; USE_PIDSTAT=true; USE_PERF=true
+fi
 
 # ======================== CONFIGURATION ========================
 PROJECT_ROOT=$(pwd)
@@ -20,7 +29,7 @@ FIO_RUNTIME="30"
 # Função de limpeza automática
 limpar_no_fim() {
     echo ""
-    echo "  [Encerramento] A desmontar o FUSE e a limpar o terminal..."
+    echo "  [Shutdown] Unmounting FUSE and cleaning up..."
     sudo fusermount3 -u "$MOUNTPOINT" 2>/dev/null || true
     stty sane
 }
@@ -36,9 +45,11 @@ sudo chown $USER:$USER "$BACKEND"
 
 compile_dedup() {
     echo "--- Compiling Deduplication Passthrough ---"
+    cd "$PROJECT_ROOT/codededup"
     make clean
     make
     cp passthrough "$FUSE_BINARY_DEDUP"
+    cd "$PROJECT_ROOT"
 }
 
 cleanup_env() {
@@ -90,17 +101,26 @@ run_fio_test() {
     local PERF_OUT="$RESULTS_DIR/${TEST_NAME}_perf.data"
 
     # 1. Start Monitors
-    { sudo "$SYSCOUNTER_BIN" "$FUSE_PID" > "$SYS_OUT" 2>&1 & } 2>/dev/null
-    local SC_PID=$!
-    { sudo "$SYSTRACER_BIN" "$FUSE_PID" > "$TRA_OUT" 2>&1 & } 2>/dev/null
-    local ST_PID=$!
-    { pidstat -p "$FUSE_PID" -u -r 1 > "$PID_OUT" 2>&1 & } 2>/dev/null
-    local PS_PID=$!
+    if [ "$USE_SYSCOUNTER" = "true" ]; then
+        { sudo "$SYSCOUNTER_BIN" "$FUSE_PID" > "$SYS_OUT" 2>&1 & } 2>/dev/null
+        SC_PID=$!
+    fi
 
-    local PERF_PID=""
-    echo "  [Profiling] Starting perf record..."
-    sudo perf record -F 99 -g -p "$FUSE_PID" -o "$PERF_OUT" -- sleep "$FIO_RUNTIME" > /dev/null 2>&1 &
-    PERF_PID=$!
+    if [ "$USE_SYSTRACER" = "true" ]; then
+        { sudo "$SYSTRACER_BIN" "$FUSE_PID" > "$TRA_OUT" 2>&1 & } 2>/dev/null
+        ST_PID=$!
+    fi
+
+    if [ "$USE_PIDSTAT" = "true" ]; then
+        { pidstat -p "$FUSE_PID" -u -r 1 > "$PID_OUT" 2>&1 & } 2>/dev/null
+        PS_PID=$!
+    fi
+
+    if [ "$USE_PERF" = "true" ]; then
+        echo "  [Profiling] Starting perf record..."
+        sudo perf record -F 99 -g -p "$FUSE_PID" -o "$PERF_OUT" -- sleep "$FIO_RUNTIME" > /dev/null 2>&1 &
+        PERF_PID=$!
+    fi
 
     sleep 1
 
@@ -122,19 +142,17 @@ run_fio_test() {
         --eta-interval=1
 
     # 3. Stop Monitors
-    if [ -n "$PERF_PID" ]; then 
-        wait "$PERF_PID" 2>/dev/null || true
-    fi
+    [ -n "$SC_PID" ] && sudo kill -INT "$SC_PID" 2>/dev/null || true
+    [ -n "$ST_PID" ] && sudo kill -INT "$ST_PID" 2>/dev/null || true
+    [ -n "$PS_PID" ] && kill -INT "$PS_PID" 2>/dev/null || true
+    [ -n "$PERF_PID" ] && wait "$PERF_PID" 2>/dev/null || true
 
-    sudo kill -INT "$SC_PID" 2>/dev/null || true
-    sudo kill -INT "$ST_PID" 2>/dev/null || true
-    kill -INT "$PS_PID" 2>/dev/null || true
     wait "$SC_PID" 2>/dev/null || true
     wait "$ST_PID" 2>/dev/null || true
 
     echo "  Test $TEST_ID completed."
-    echo "Real size on backend: $(sudo du -sh /backend/.sysdata)"
-    echo "Logical space seen on mountpoint: $(du -sh "$MOUNTPOINT" | awk '{print $1}')"
+    echo "Backend Size: $(sudo du -sh "$BACKEND" | awk '{print $1}')"
+    echo "Logical Size: $(du -sh "$MOUNTPOINT" | awk '{print $1}')"
 }
 
 # ======================== EXECUTION ========================
@@ -148,3 +166,5 @@ run_fio_test "DEDUP" "1.1" 0 1 "write"
 cleanup_env
 
 echo "Test 1.1 (DEDUP 0% Dedup) Complete."
+"
+"

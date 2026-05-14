@@ -1,6 +1,15 @@
 #!/bin/bash
 set -e
 
+# ======================== OBSERVABILITY TOGGLES ========================
+# Por defeito, tudo FALSE. Para ativar, corre: USE_PIDSTAT=true ./script.sh
+USE_PIDSTAT=${USE_PIDSTAT:-false}
+USE_PERF=${USE_PERF:-false}
+
+if [ "${USE_ALL:-false}" = "true" ]; then
+    USE_PIDSTAT=true; USE_PERF=true
+fi
+
 # ======================== CONFIGURATION ========================
 PROJECT_ROOT=$(pwd)
 MOUNTPOINT="/mnt/fs"
@@ -11,7 +20,7 @@ FUSE_BINARY_BASE="$PROJECT_ROOT/passthrough_base"
 # Função de limpeza automática
 limpar_no_fim() {
     echo ""
-    echo "  [Encerramento] A desmontar o FUSE e a limpar o terminal..."
+    echo "  [Shutdown] Unmounting FUSE and cleaning up..."
     sudo fusermount3 -u "$MOUNTPOINT" 2>/dev/null || true
     stty sane
 }
@@ -66,20 +75,24 @@ run_aging_test() {
     local TEST_NAME="${VERSION_NAME}_T2.0_aging"
 
     echo ""
-    echo ">>> RUNNING PHASE 2 (AGING COM FIO - MODO FILE SERVER): $TEST_NAME"
+    echo ">>> RUNNING PHASE 2 (AGING WITH FIO - FILE SERVER MODE): $TEST_NAME"
 
     local OUT_FILE="$RESULTS_DIR/${TEST_NAME}_output.txt"
     local MEM_OUT="$RESULTS_DIR/${TEST_NAME}_pidstat.txt"
     local PERF_OUT="$RESULTS_DIR/${TEST_NAME}_perf.data"
 
-    # Start Memory Monitoring
-    pidstat -p "$FUSE_PID" -r 1 > "$MEM_OUT" 2>&1 &
-    local PS_PID=$!
+    # Start Monitors
+    if [ "$USE_PIDSTAT" = "true" ]; then
+        echo "  [Monitor] Starting pidstat..."
+        pidstat -p "$FUSE_PID" -r 1 > "$MEM_OUT" 2>&1 &
+        PS_PID=$!
+    fi
 
-    local PERF_PID=""
-    echo "  [Profiling] Starting perf record..."
-    sudo perf record -F 99 -g -p "$FUSE_PID" -o "$PERF_OUT" -- sleep 60 > /dev/null 2>&1 &
-    PERF_PID=$!
+    if [ "$USE_PERF" = "true" ]; then
+        echo "  [Monitor] Starting perf record..."
+        sudo perf record -F 99 -g -p "$FUSE_PID" -o "$PERF_OUT" -- sleep 60 > /dev/null 2>&1 &
+        PERF_PID=$!
+    fi
 
     # Run FIO em Modo File Server (Ciclo de vida completo durante 60 segundos)
     echo "  Executing FIO Aging Workload (Create -> Write -> Read -> Delete)..."
@@ -100,14 +113,17 @@ run_aging_test() {
         --runtime=60 \
         --group_reporting \
         --eta-interval=1 \
+        > "$OUT_FILE" 2>&1
 
-    # Stop Monitor
+    # Stop Monitors
     if [ -n "$PERF_PID" ]; then 
         wait "$PERF_PID" 2>/dev/null || true
     fi
 
-    kill -INT "$PS_PID" 2>/dev/null || true
-    wait "$PS_PID" 2>/dev/null || true
+    if [ -n "$PS_PID" ]; then 
+        kill -INT "$PS_PID" 2>/dev/null || true
+        wait "$PS_PID" 2>/dev/null || true
+    fi
 
     echo "  Phase 2 completed for $VERSION_NAME."
 }
