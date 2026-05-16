@@ -15,15 +15,15 @@ BACKEND="/backend"
 RESULTS_DIR="$PROJECT_ROOT/benchmark_results/$(basename "$0" .sh)"
 FUSE_BINARY_DEDUP="$PROJECT_ROOT/passthrough_dedup"
 
-# Automatic cleanup function
-limpar_no_fim() {
+# Em caso de encerramento forçado
+force_cleanup() {
     echo ""
     echo "  [Shutdown] Unmounting FUSE and cleaning up..."
     sudo fusermount3 -u "$MOUNTPOINT" 2>/dev/null || true
     stty sane
 }
 
-trap limpar_no_fim EXIT SIGINT SIGTERM
+trap force_cleanup EXIT SIGINT SIGTERM
 
 # PREPARATION
 mkdir -p "$RESULTS_DIR"
@@ -57,10 +57,8 @@ mount_fuse() {
     { sudo "$BINARY" "$MOUNTPOINT" -omodules="subdir,subdir=$BACKEND" -oallow_other -f > "$RESULTS_DIR/fuse_log.txt" 2>&1 & } 2>/dev/null
     sleep 2
     
-    # Tenta pidof primeiro (mais preciso para o binário real)
     FUSE_PID=$(pidof -s "$BIN_NAME")
     
-    # Se falhar, usa pgrep -n (newest) para ignorar o processo sudo mais antigo
     if [ -z "$FUSE_PID" ]; then
         FUSE_PID=$(pgrep -n -f "$BINARY")
     fi

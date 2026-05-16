@@ -16,7 +16,7 @@ def analyse_systracer(file_path):
     
     # Counters and collections to store telemetry
     syscall_counter = Counter()
-    layer_counter = Counter() # VFS, EXT4, BIO, syscall
+    layer_counter = Counter()
     unique_files = set()
     total_processed_lines = 0
 
@@ -25,31 +25,24 @@ def analyse_systracer(file_path):
     for line in lines:
         line = line.strip()
         
-        # Ignore empty lines
         if not line:
             continue
             
-        # Detect end of file and if events were lost by eBPF
         if line.startswith("Lost"):
             lost_events = line
             continue
 
-        # Detect when the data table actually starts
         if line.startswith("pid") and "command" in line:
             continue
         if line.startswith("---"):
             data_started = True
             continue
 
-        # Process real data lines
+        # Process data lines
         if data_started:
-            # split() divides by spaces (even multiple spaces)
             parts = line.split()
             
-            # A valid systracer line has at least 5 columns:
-            # [0]pid, [1]command, [2]syscall, [3]type, [4]filename
             if len(parts) >= 5:
-                # PID and Command are not needed as they are always your FUSE
                 operation = parts[2]
                 layer = parts[3]
                 file_name = parts[4]
@@ -60,24 +53,22 @@ def analyse_systracer(file_path):
                 total_processed_lines += 1
 
     print(f"\n{'='*50}")
-    print(f"🕵️  TRACER X-RAY (eBPF): {test_name}")
+    print(f"TRACER X-RAY (eBPF): {test_name}")
     print(f"{'='*50}")
 
     print(f"Total events processed: {total_processed_lines:,}")
     print(f"Capture State: {lost_events}\n")
 
-    print("📚 KERNEL LAYER DISTRIBUTION:")
+    print("KERNEL LAYER DISTRIBUTION:")
     for layer, count in layer_counter.most_common():
         percentage = (count / total_processed_lines) * 100 if total_processed_lines > 0 else 0
         print(f"   ┣ {layer:<10}: {count:>8,} events ({percentage:.1f}%)")
 
-    print("\n⚙️  TOP OPERATIONS / SYSCALLS:")
-    # Show only top 5 to keep terminal clean
+    print("\nTOP OPERATIONS / SYSCALLS:")
     for op, count in syscall_counter.most_common(5):
         print(f"   ┣ {op:<10}: {count:>8,} times")
 
-    print("\n📁 INTERCEPTED FILES (Unique Accesses):")
-    # Show at most 5 files to summarize
+    print("\nINTERCEPTED FILES (Unique Accesses):")
     file_list = list(unique_files)
     for file in file_list[:5]:
         print(f"   ┣ {file}")

@@ -25,12 +25,9 @@ def pidstat_analyse(filepath):
         if not parts:
             continue
 
-        # Ignore OS header (e.g., Linux 6.14.0...)
         if parts[0] == "Linux":
             continue
 
-        # Ignore "Average:" lines pre-calculated by pidstat
-        # (we calculate the average ourselves for precision)
         if parts[0] == "Average:":
             continue
 
@@ -39,10 +36,9 @@ def pidstat_analyse(filepath):
             active_header = parts
             continue
 
-        # Data line (same number of columns as header)
+        # Data line
         if active_header and len(parts) == len(active_header):
             try:
-                # Confirm PID column is a number to avoid errors
                 pid_idx = active_header.index("PID")
                 int(parts[pid_idx])
                 
@@ -50,14 +46,12 @@ def pidstat_analyse(filepath):
                 for metric in metrics.keys():
                     if metric in active_header:
                         idx = active_header.index(metric)
-                        # Replace commas with dots if system is in Portuguese
                         value = float(parts[idx].replace(',', '.'))
                         metrics[metric].append(value)
             except ValueError:
-                # Corrupted line or misread header, skip
                 continue
 
-    # Helper function to calculate averages safely
+    # Helper function to calculate averages
     def calculate_average(data_list):
         if not data_list: return 0.0
         return sum(data_list) / len(data_list)
@@ -69,7 +63,6 @@ def pidstat_analyse(filepath):
     
     avg_minflt = calculate_average(metrics['minflt/s'])
     
-    # RSS is in Kilobytes. Convert to Megabytes for readability.
     avg_rss_kb = calculate_average(metrics['RSS'])
     avg_rss_mb = avg_rss_kb / 1024
     avg_mem_pct = calculate_average(metrics['%MEM'])
@@ -77,7 +70,7 @@ def pidstat_analyse(filepath):
     avg_cswch = calculate_average(metrics['cswch/s'])
     avg_nvcswch = calculate_average(metrics['nvcswch/s'])
 
-    # Total samples read (in seconds)
+    # Total samples read
     recorded_seconds = len(metrics['%CPU'])
 
     print(f"\n{'='*50}")

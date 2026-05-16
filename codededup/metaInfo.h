@@ -10,7 +10,7 @@ typedef struct file{
     char *id; //path
     off_t realSize; //tamanho depois da deduplicacao
     off_t logicalSize; // tamanho antes da deduplicacao
-    GPtrArray *blockList; // Array de blockmeta*
+    GPtrArray *blockList; // Array de apontadores para o bloco
     ticket_rwlock_t lock; // lock para operações neste ficheiro
 } filemeta;
 

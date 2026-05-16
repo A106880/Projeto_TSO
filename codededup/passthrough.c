@@ -500,7 +500,6 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
 	return 0;
 }
 
-// Função auxiliar para ordenar blocos e evitar deadlocks
 static gint compare_blocks(gconstpointer a, gconstpointer b) {
     blockmeta *block_a = (blockmeta *)a;
     blockmeta *block_b = (blockmeta *)b;
@@ -568,23 +567,23 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
         }
 
         if (ctx->backend_fd != -1) {
-            void *buffer_alinhado;
-            if (posix_memalign(&buffer_alinhado, 4096, 4096) != 0) {
+            void *aligned_buffer;
+            if (posix_memalign(&aligned_buffer, 4096, 4096) != 0) {
                 err = -ENOMEM;
                 break;
             }
 
-            ssize_t ret = pread(ctx->backend_fd, buffer_alinhado, 4096, block->block_offset);
+            ssize_t ret = pread(ctx->backend_fd, aligned_buffer, 4096, block->block_offset);
             
             if (ret == -1) { 
                 err = -errno; 
-                free(buffer_alinhado);
+                free(aligned_buffer);
                 break; 
             }
 
-            memcpy(buf_ptr, (char *)buffer_alinhado + read_start_in_block, bytes_to_read);
+            memcpy(buf_ptr, (char *)aligned_buffer + read_start_in_block, bytes_to_read);
 
-            free(buffer_alinhado);
+            free(aligned_buffer);
 
         } else { 
             err = -EBADF; 

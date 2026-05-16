@@ -23,13 +23,10 @@ void ticket_rwlock_read_lock(ticket_rwlock_t *lock) {
         pthread_cond_wait(&lock->cond_readers, &lock->mutex);
     }
     
-    // It's our turn
     lock->readers_active++;
     lock->now_serving++;
     
-    // Allow other readers in the batch to enter
     pthread_cond_broadcast(&lock->cond_readers);
-    // Also signal writers in case we were the last thing they were waiting for (though unlikely here)
     
     pthread_mutex_unlock(&lock->mutex);
 }
@@ -39,7 +36,6 @@ void ticket_rwlock_read_unlock(ticket_rwlock_t *lock) {
     lock->readers_active--;
     
     if (lock->readers_active == 0) {
-        // Wake up the next writer who might be waiting for readers to finish
         pthread_cond_broadcast(&lock->cond_writers);
     }
     
@@ -54,7 +50,6 @@ void ticket_rwlock_write_lock(ticket_rwlock_t *lock) {
         pthread_cond_wait(&lock->cond_writers, &lock->mutex);
     }
     
-    // Holding the write lock. We don't increment now_serving yet.
     pthread_mutex_unlock(&lock->mutex);
 }
 
@@ -63,7 +58,6 @@ void ticket_rwlock_write_unlock(ticket_rwlock_t *lock) {
     
     lock->now_serving++;
     
-    // Wake up potential readers or the next writer
     pthread_cond_broadcast(&lock->cond_readers);
     pthread_cond_broadcast(&lock->cond_writers);
     

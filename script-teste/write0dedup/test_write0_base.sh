@@ -22,19 +22,19 @@ SYSCOUNTER_BIN="$PROJECT_ROOT/syscounter/syscounter"
 SYSTRACER_BIN="$PROJECT_ROOT/systracer/systracer"
 
 # FIO Global Params
-FIO_SIZE="128M"
+FIO_SIZE="512M"
 FIO_BS="4k"
-FIO_RUNTIME="30"
+FIO_RUNTIME="60"
 
-# Função de limpeza automática
-limpar_no_fim() {
+# Em caso de encerramento forçado
+force_cleanup() {
     echo ""
     echo "  [Shutdown] Unmounting FUSE and cleaning up..."
     sudo fusermount3 -u "$MOUNTPOINT" 2>/dev/null || true
     stty sane
 }
 
-trap limpar_no_fim EXIT SIGINT SIGTERM
+trap force_cleanup EXIT SIGINT SIGTERM
 
 # PREPARATION
 mkdir -p "$RESULTS_DIR"
@@ -64,10 +64,8 @@ mount_fuse() {
     { sudo "$BINARY" "$MOUNTPOINT" -omodules="subdir,subdir=$BACKEND" -oallow_other -f > "$RESULTS_DIR/fuse_log.txt" 2>&1 & } 2>/dev/null
     sleep 2
     
-    # Tenta pidof primeiro (mais preciso para o binário real)
     FUSE_PID=$(pidof -s "$BIN_NAME")
     
-    # Se falhar, usa pgrep -n (newest) para ignorar o processo sudo mais antigo
     if [ -z "$FUSE_PID" ]; then
         FUSE_PID=$(pgrep -n -f "$BINARY")
     fi
@@ -80,8 +78,8 @@ mount_fuse() {
 }
 
 run_fio_test() {
-    local VERSION_NAME="$1" # "BASE" or "DEDUP"
-    local TEST_ID="$2"      # e.g., "1.1"
+    local VERSION_NAME="$1"
+    local TEST_ID="$2"
     local DEDUP_PCT="$3"
     local NUM_JOBS="${4:-1}"
     local RW_TYPE="${5:-write}"
@@ -128,6 +126,8 @@ run_fio_test() {
         --bs="$FIO_BS" \
         --direct=1 \
         --fallocate=none \
+        --time_based \
+        --runtime="$FIO_RUNTIME" \
         --rw="$RW_TYPE" \
         --ioengine=psync \
         --dedupe_percentage="$DEDUP_PCT" \
@@ -161,4 +161,4 @@ mount_fuse "$FUSE_BINARY_BASE"
 run_fio_test "BASE" "1.0" 0 1 "write"
 cleanup_env
 
-echo "Test 1.0 (BASE 0% Dedup) Complete."
+echo "Test (BASE 0% Dedup) Complete."

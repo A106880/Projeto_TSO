@@ -16,14 +16,15 @@ BACKEND="/backend"
 RESULTS_DIR="$PROJECT_ROOT/benchmark_results/$(basename "$0" .sh)"
 FUSE_BINARY_BASE="$PROJECT_ROOT/passthrough_base"
 
-cleanup() {
+# Em caso de encerramento forçado
+force_cleanup() {
     echo ""
     echo "  [Shutdown] Unmounting FUSE and cleaning up..."
     sudo fusermount3 -u "$MOUNTPOINT" 2>/dev/null || true
     stty sane
 }
 
-trap limpar_no_fim EXIT SIGINT SIGTERM
+trap force_cleanup EXIT SIGINT SIGTERM
 
 # PREPARATION
 mkdir -p "$RESULTS_DIR"
@@ -70,7 +71,7 @@ run_aging_test() {
     local TEST_NAME="${VERSION_NAME}_T2.0_aging"
 
     echo ""
-    echo ">>> RUNNING PHASE 2 (AGING WITH FIO - FILE SERVER MODE): $TEST_NAME"
+    echo ">>> RUNNING AGING TEST: $TEST_NAME"
 
     local OUT_FILE="$RESULTS_DIR/${TEST_NAME}_output.txt"
     local MEM_OUT="$RESULTS_DIR/${TEST_NAME}_pidstat.txt"
@@ -89,7 +90,7 @@ run_aging_test() {
         PERF_PID=$!
     fi
 
-    # Run FIO em Modo File Server (Ciclo de vida completo durante 60 segundos)
+    # Run FIO
     echo "  Executing FIO Aging Workload (Create -> Write -> Read -> Delete)..."
     fio --name="aging_fileserver" \
         --directory="$MOUNTPOINT" \

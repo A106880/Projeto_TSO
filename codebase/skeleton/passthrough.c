@@ -362,12 +362,9 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 	if (fd == -1)
 		return -errno;
 
-	/* If fd uses O_DIRECT we must ensure buffer, size and offset are aligned. */
 	if (fd_has_odirect(fd)) {
 		size_t align = get_fd_alignment(fd);
 		if ((size % align) == 0 && (offset % align) == 0) {
-			/* Size and offset are aligned, but buffer might not be.
-			   Use a temporary aligned buffer to keep using O_DIRECT. */
 			if (((uintptr_t)buf % align) != 0) {
 				void *aligned_buf;
 				if (posix_memalign(&aligned_buf, align, size) == 0) {
@@ -383,7 +380,6 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 				}
 			}
 		} else {
-			/* Size or offset are not aligned. Fall back to non-O_DIRECT open. */
 			int fd2 = open(path, O_RDONLY);
 			if (fd2 == -1) {
 				if (fi == NULL) close(fd);
@@ -421,12 +417,9 @@ static int xmp_write(const char *path, const char *buf, size_t size,
 	if (fd == -1)
 		return -errno;
 
-	/* If fd uses O_DIRECT we must ensure buffer, size and offset are aligned. */
 	if (fd_has_odirect(fd)) {
 		size_t align = get_fd_alignment(fd);
 		if ((size % align) == 0 && (offset % align) == 0) {
-			/* Size and offset are aligned, but buffer might not be.
-			   Use a temporary aligned buffer to keep using O_DIRECT. */
 			if (((uintptr_t)buf % align) != 0) {
 				void *aligned_buf;
 				if (posix_memalign(&aligned_buf, align, size) == 0) {
@@ -439,7 +432,6 @@ static int xmp_write(const char *path, const char *buf, size_t size,
 				}
 			}
 		} else {
-			/* Size or offset are not aligned. Fall back to non-O_DIRECT open. */
 			int fd2 = open(path, O_WRONLY);
 			if (fd2 == -1) {
 				if (fi == NULL) close(fd);

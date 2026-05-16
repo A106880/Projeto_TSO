@@ -3,7 +3,7 @@
 void freeFilemeta(void *data){
     if (!data) return;
 	filemeta *file = (filemeta*)data;
-	g_ptr_array_free(file->blockList, TRUE); //liberta o array e os apontadores
+	g_ptr_array_free(file->blockList, TRUE);
     if (file->id) g_free(file->id);
     ticket_rwlock_destroy(&file->lock);
     g_free(file);

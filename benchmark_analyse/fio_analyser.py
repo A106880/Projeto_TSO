@@ -13,7 +13,6 @@ def analyse_fio_json(filepath):
         print(f"Error: File '{filepath}' is not a valid JSON.")
         return
 
-    # FIO aggregate data is in the first "job" when using --group_reporting
     if 'jobs' not in data or len(data['jobs']) == 0:
         print("Error: Unexpected JSON format (missing 'jobs' key).")
         return
@@ -35,7 +34,7 @@ def analyse_fio_json(filepath):
         op_data = job.get(operation_type, {})
         iops = op_data.get('iops', 0)
 
-        # If IOPS is 0, it means this operation did not occur (e.g., 100% write test)
+        # In case of failed operation
         if iops == 0:
             return
 
@@ -45,7 +44,7 @@ def analyse_fio_json(filepath):
 
         # Total Latency (lat_ns) and Completion Latency (clat_ns) are in nanoseconds
         lat_ns = op_data.get('lat_ns', {})
-        lat_mean_ms = lat_ns.get('mean', 0) / 1000000 # Convert ns to milliseconds
+        lat_mean_ms = lat_ns.get('mean', 0) / 1000000
 
         clat_ns = op_data.get('clat_ns', {})
         percentiles = clat_ns.get('percentile', {})
@@ -54,7 +53,7 @@ def analyse_fio_json(filepath):
         p95_ms = percentiles.get('95.000000', 0) / 1000000
         p99_ms = percentiles.get('99.000000', 0) / 1000000
 
-        print(f"🔄 OPERATION: {operation_type.upper()}")
+        print(f"OPERATION: {operation_type.upper()}")
         print(f"   ┣ Throughput (BW): {bw_mb:.2f} MB/s")
         print(f"   ┣ IOPS:            {iops:.2f}")
         print(f"   ┣ Average Latency:  {lat_mean_ms:.3f} ms")
