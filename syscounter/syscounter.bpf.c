@@ -4,9 +4,11 @@
 #include <bpf/bpf_core_read.h>
 #include "syscounter.h"
 
-#define MYOP_OPEN 56
-#define MYOP_READ 63
-#define MYOP_WRITE 64
+#define MYOP_READ 0
+#define MYOP_WRITE 1
+#define MYOP_CLOSE 3
+#define MYOP_PWRITE 18
+#define MYOP_OPENAT 257
 
 // Define a map to store the pids to be filtered (i.e., traced)
 struct {

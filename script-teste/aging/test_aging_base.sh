@@ -121,7 +121,7 @@ run_aging_test() {
         wait "$PS_PID" 2>/dev/null || true
     fi
 
-    echo "  Phase 2 completed for $VERSION_NAME."
+    echo "  Test completed for $VERSION_NAME."
 }
 
 # EXECUTION

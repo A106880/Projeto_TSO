@@ -73,7 +73,7 @@ mount_fuse() {
 run_phase3_space_recycle() {
     echo ""
     echo "============================================="
-    echo " PHASE 3: SPACE RECYCLE VALIDATION"
+    echo " Test: SPACE RECYCLE VALIDATION"
     echo "============================================="
 
     cleanup_env
@@ -110,7 +110,7 @@ run_phase3_space_recycle() {
 
     # Step 4: Verification
     echo ""
-    echo ">>> PHASE 3 RESULTS"
+    echo ">>> Test RESULTS"
     echo "------------------------------------------------"
     echo "Size Before Delete: $SIZE_BEFORE bytes"
     echo "Size After Refill:  $SIZE_AFTER bytes"

@@ -5,9 +5,12 @@
 #include "systracer.h"
 #include "hash.h"
 
-#define MYOP_OPEN 56
-#define MYOP_READ 63
-#define MYOP_WRITE 64
+#define MYOP_OPEN 2
+#define MYOP_READ 0
+#define MYOP_WRITE 1
+#define MYOP_CLOSE 3
+#define MYOP_PWRITE 18
+#define MYOP_OPENAT 257
 
 // Define a ring buffer map to send data to user space
 struct {

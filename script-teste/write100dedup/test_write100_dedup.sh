@@ -43,6 +43,21 @@ sudo chown $USER:$USER "$BACKEND"
 
 # HELPER FUNCTIONS
 
+compile_tracers() {
+    echo "--- Compiling Tracers (syscounter & systracer) ---"
+    if [ "$USE_SYSCOUNTER" = "true" ]; then
+        echo "  [Build] Compiling syscounter..."
+        cd "$PROJECT_ROOT/syscounter"
+        make clean && make
+    fi
+    if [ "$USE_SYSTRACER" = "true" ]; then
+        echo "  [Build] Compiling systracer..."
+        cd "$PROJECT_ROOT/systracer"
+        make clean && make
+    fi
+    cd "$PROJECT_ROOT"
+}
+
 compile_dedup() {
     echo "--- Compiling Deduplication Passthrough ---"
     cd "$PROJECT_ROOT/codededup"
@@ -160,6 +175,7 @@ sudo pkill -9 -f "[p]assthrough_dedup" || true
 sudo fusermount3 -u "$MOUNTPOINT" 2>/dev/null || true
 
 compile_dedup
+compile_tracers
 cleanup_env
 mount_fuse "$FUSE_BINARY_DEDUP"
 run_fio_test "DEDUP" "1.3" 100 1 "write"
