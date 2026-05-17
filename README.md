@@ -42,12 +42,12 @@ Os benchmarks estão organizados por categorias dentro da pasta `script-teste/`.
 ### Correr um teste individual
 Podes correr qualquer script `.sh` diretamente:
 ```bash
-./script-teste/write50dedup/test_write50_mt_dedup.sh
+sudo ./script-teste/write50dedup/test_write50_mt_dedup.sh
 ```
 
 ### Correr todos os testes sequencialmente
 ```bash
-./script-teste/run_all.sh
+sudo ./script-teste/run_all.sh
 ```
 
 ### Observabilidade e Toggles (Variáveis de Ambiente)
@@ -62,10 +62,10 @@ Por defeito, os testes correm "limpos" (apenas o FIO). Podes ativar ferramentas 
 **Exemplos:**
 ```bash
 # Correr com monitorização de memória
-USE_PIDSTAT=true ./script-teste/aging/test_aging_dedup.sh
+sudo USE_PIDSTAT=true ./script-teste/aging/test_aging_dedup.sh
 
 # Correr tudo com observabilidade total
-USE_ALL=true ./script-teste/run_all.sh
+sudo USE_ALL=true ./script-teste/run_all.sh
 ```
 
 ---
