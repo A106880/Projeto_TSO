@@ -170,8 +170,9 @@ int main(int argc, char *argv[])
     int err;
 
 
-	/* Cleaner handling of Ctrl-C */
+	/* Cleaner handling of Ctrl-C and kill (SIGTERM) */
 	signal(SIGINT, sig_handler);
+	signal(SIGTERM, sig_handler);
 
 	/* Load & verify BPF programs */
 	skel = syscounter_bpf__open_and_load();
@@ -204,7 +205,7 @@ int main(int argc, char *argv[])
 	}
 
 	/* Process events until interrupted */
-	printf("Successfully started! Press Ctrl-C to stop and print results.\n");
+	printf("Successfully started! Press Ctrl-C or kill to stop and print results.\n");
 	// Use a very large sleep interval and rely on the signal handler to set exiting to true when Ctrl-C is pressed.
 	while (!exiting) {
         sleep(99999999);
@@ -222,6 +223,7 @@ int main(int argc, char *argv[])
 		int pid_count = get_unique_pid_values(keys, num_entries, pid_list);
 		int op_count = get_unique_op_values(keys, num_entries, op_list);
 		print_results(keys, values, num_entries, pid_list, pid_count, op_list, op_count);
+		fflush(stdout);
 	}
 
 	cleanup:
