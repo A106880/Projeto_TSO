@@ -22,7 +22,7 @@ SYSCOUNTER_BIN="$PROJECT_ROOT/syscounter/syscounter"
 SYSTRACER_BIN="$PROJECT_ROOT/systracer/systracer"
 
 # FIO Global Params
-FIO_SIZE="512M"
+FIO_SIZE="256M"
 FIO_BS="4k"
 
 # Em caso de encerramento forçado
