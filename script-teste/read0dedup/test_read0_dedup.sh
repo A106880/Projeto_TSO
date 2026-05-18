@@ -22,9 +22,8 @@ SYSCOUNTER_BIN="$PROJECT_ROOT/syscounter/syscounter"
 SYSTRACER_BIN="$PROJECT_ROOT/systracer/systracer"
 
 # FIO Global Params
-FIO_SIZE="256M"
+FIO_SIZE="512M"
 FIO_BS="4k"
-FIO_RUNTIME="60"
 
 # Em caso de encerramento forçado
 force_cleanup() {
@@ -131,7 +130,7 @@ run_fio_test() {
 
     if [ "$USE_PERF" = "true" ]; then
         echo "  [Profiling] Starting perf record..."
-        sudo perf record -F 99 -g -p "$FUSE_PID" -o "$PERF_OUT" -- sleep "$FIO_RUNTIME" > /dev/null 2>&1 &
+        sudo perf record -F 99 -g -p "$FUSE_PID" -o "$PERF_OUT" > /dev/null 2>&1 &
         PERF_PID=$!
     fi
 
@@ -145,8 +144,6 @@ run_fio_test() {
         --bs="$FIO_BS" \
         --direct=1 \
         --fallocate=none \
-        --time_based \
-        --runtime="$FIO_RUNTIME" \
         --rw="$RW_TYPE" \
         --ioengine=psync \
         --dedupe_percentage="$DEDUP_PCT" \
@@ -160,6 +157,7 @@ run_fio_test() {
     [ -n "$SC_PID" ] && sudo kill -INT "$SC_PID" 2>/dev/null || true
     [ -n "$ST_PID" ] && sudo kill -INT "$ST_PID" 2>/dev/null || true
     [ -n "$PS_PID" ] && kill -INT "$PS_PID" 2>/dev/null || true
+    [ -n "$PERF_PID" ] && sudo kill -INT "$PERF_PID" 2>/dev/null || true
     [ -n "$PERF_PID" ] && wait "$PERF_PID" 2>/dev/null || true
 
     wait "$SC_PID" 2>/dev/null || true
