@@ -160,7 +160,7 @@ static void xmp_destroy(void* private_data){
 static int xmp_getattr(const char *path, struct stat *stbuf,
 		       struct fuse_file_info *fi)
 {
-	if (strcmp(path, "/.metadata") == 0 || strcmp(path, "/.sysdata") == 0) {
+	if (strcmp(path, "/backend/.metadata") == 0 || strcmp(path, "/backend/.sysdata") == 0) {
         return -ENOENT;
     }
 	(void) fi;
@@ -258,7 +258,7 @@ static int xmp_mknod(const char *path, mode_t mode, dev_t rdev)
 
 static int xmp_unlink(const char *path)
 {
-	if (strcmp(path, "/.metadata") == 0 || strcmp(path, "/.sysdata") == 0) {
+	if (strcmp(path, "/backend/.metadata") == 0 || strcmp(path, "/backend/.sysdata") == 0) {
 	    return -EPERM;
 	}
     struct fuse_context *f_ctx = fuse_get_context();
@@ -341,8 +341,8 @@ static int xmp_symlink(const char *from, const char *to)
 
 static int xmp_rename(const char *from, const char *to, unsigned int flags)
 {
-	if (strcmp(from, "/.metadata") == 0 || strcmp(from, "/.sysdata") == 0 ||
-	    strcmp(to, "/.metadata") == 0 || strcmp(to, "/.sysdata") == 0) {
+	if (strcmp(from, "/backend/.metadata") == 0 || strcmp(from, "/backend/.sysdata") == 0 ||
+	    strcmp(to, "/backend/.metadata") == 0 || strcmp(to, "/backend/.sysdata") == 0) {
 	    return -EPERM;
 	}
 	int res;
@@ -428,7 +428,7 @@ static int xmp_utimens(const char *path, const struct timespec ts[2],
 static int xmp_create(const char *path, mode_t mode,
 		      struct fuse_file_info *fi)
 {
-	if (strcmp(path, "/.metadata") == 0 || strcmp(path, "/.sysdata") == 0) {
+	if (strcmp(path, "/backend/.metadata") == 0 || strcmp(path, "/backend/.sysdata") == 0) {
 	    return -EACCES;
 	}
 	int res;
@@ -480,7 +480,7 @@ static int xmp_rmdir(const char *path){
 
 static int xmp_open(const char *path, struct fuse_file_info *fi)
 {
-	if (strcmp(path, "/.metadata") == 0 || strcmp(path, "/.sysdata") == 0) {
+	if (strcmp(path, "/backend/.metadata") == 0 || strcmp(path, "/backend/.sysdata") == 0) {
 	    return -EACCES;
 	}
 	int res;
