@@ -2,6 +2,8 @@
 
 Este projeto implementa um sistema de ficheiros FUSE com suporte para deduplicação e inclui uma suite completa de benchmarks e ferramentas de análise.
 
+Nota Final: 17.5
+
 ## 1. Compilação
 
 Para compilar o sistema de ficheiros (FUSE):
